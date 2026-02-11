@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bonsai IDE</title>
+    <style>
+        .code-block {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+            white-space: pre-wrap;
+            background: #f9f9f9;
+        }
+
+        .loading {
+            font-style: italic;
+            color: #888;
+        }
+
+        .version-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        /* Activity palette (match extension.ts getActivityColor) */
+        :root {
+            --color-fix-with: #834632;
+            /* deep green-teal */
+            --color-fix-nocontext: #83675e;
+            /* lighter green-teal, same family */
+
+            --color-tests: #970071;
+            /* indigo */
+            --color-refactor: #006d18;
+            /* golden yellow */
+            --color-exceptions: #00b0b6;
+            /* warm orange */
+            --color-other: #777777;
+            /* neutral dark gray */
+        }
+
+        .btn-activity {
+            appearance: none;
+            border: 0;
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-weight: 600;
+            color: #fff;
+            background: var(--btn-color, #7f7f7f);
+            cursor: pointer;
+            transition: transform .05s ease, filter .15s ease, opacity .15s ease;
+        }
+
+        .btn-activity:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn-activity:active {
+            transform: translateY(0);
+        }
+
+        .btn-activity:disabled {
+            cursor: not-allowed;
+            filter: grayscale(35%) opacity(.8);
+        }
+
+        /* Map data-activity -> button color */
+        .btn-activity[data-activity="fix_with_context"] {
+            --btn-color: var(--color-fix-with);
+        }
+
+        .btn-activity[data-activity="fix_without_context"] {
+            --btn-color: var(--color-fix-nocontext);
+        }
+
+        .btn-activity[data-activity="gen_tests"] {
+            --btn-color: var(--color-tests);
+        }
+
+        .btn-activity[data-activity="refactor"] {
+            --btn-color: var(--color-refactor);
+        }
+
+        .btn-activity[data-activity="exceptions"] {
+            --btn-color: var(--color-exceptions);
+        }
+
+        /* Legend pills */
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 8px 0 2px;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            color: #222;
+            background: #f3f3f3;
+            border: 1px solid #ddd;
+        }
+
+        .swatch {
+            display: inline-block;
+            width: 20px;
+            height: 12px;
+            border-radius: 6px;
+        }
+
+        .swatch.gradient {
+            width: 60px;
+            background: linear-gradient(to right, blue, yellow);
+            border: 1px solid #ccc;
+        }
+
+        .swatch.fix_with_context {
+            background: var(--color-fix-with);
+        }
+
+        .swatch.fix_without_context {
+            background: var(--color-fix-nocontext);
+        }
+
+        .swatch.gen_tests {
+            background: var(--color-tests);
+        }
+
+        .swatch.refactor {
+            background: var(--color-refactor);
+        }
+
+        .swatch.exceptions {
+            background: var(--color-exceptions);
+        }
+
+        .swatch.other {
+            background: var(--color-other);
+        }
+    </style>
+
+</head>
+
+<body>
+    <h2>Bonsai</h2>
+    <!-- Legend (matches node colors) -->
+    <div class="legend">
+        <span class="pill"><span class="swatch fix_with_context"></span>Fix with description</span>
+        <span class="pill"><span class="swatch fix_without_context"></span>Fix w/o description</span>
+        <span class="pill"><span class="swatch gen_tests"></span>Generate tests</span>
+        <span class="pill"><span class="swatch refactor"></span>Refactor</span>
+        <span class="pill"><span class="swatch exceptions"></span>Handle exceptions</span>
+        <span class="pill"><span class="swatch other"></span>Other</span>
+        <span class="pill">
+            <span class="swatch gradient"></span>Border: Code Similarity (Less → More)
+        </span>
+    </div>
+    <!-- Bonsai Graph -->
+    <div id="graph" style="width: 100%; height: 500px; border: 1px solid #ddd;"></div>
+    <button id="btnExportJson" title="Export current Bonsai as JSON">Export JSON</button>
+    <button id="btnImportJson" title="Import Bonsai from JSON">Import JSON</button>
+
+    <h2>Source code of the node selected</h2>
+    <textarea style="width: 100%;" id="code" rows="10"
+        cols="60">def hello():\n    print(\"Hello, world!\")</textarea><br>
+    <!-- Collapsible Reasoning Panel -->
+    <details id="reasoningPanel" style="margin-top:8px;">
+        <summary style="cursor:pointer; font-weight:600;">Reasoning</summary>
+        <pre id="reasoningContent" class="code-block" style="max-height:280px; overflow:auto; margin-top:6px;"></pre>
+    </details>
+    <hr>
+    <!-- Activities Panel -->
+    <h2>Activities</h2>
+    <div id="problemDescDiv" style="margin: 8px 0;">
+        <label style="display:block; font-weight:600;">Problem description (for the “with context” activity):</label>
+        <textarea id="problemDesc" rows="4" cols="60"
+            placeholder="Describe the bug / failure scenario / expected behavior..."></textarea>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+        <span style="font-weight:600;">Initial (run one of these first):</span>
+        <button id="btnFixWith" class="btn-activity" data-activity="fix_with_context"
+            title="Fix the problem using the provided problem description">Fix with problem description</button>
+        <button id="btnFixNoCtx" class="btn-activity" data-activity="fix_without_context"
+            title="Fix the problem without a provided description; infer it from code/tests">Fix without
+            description</button>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <span style="font-weight:600;">Then:</span>
+        <button id="btnGenTests" class="btn-activity" data-activity="gen_tests" disabled
+            title="Generate unit tests">Generate tests</button>
+        <button id="btnRefactor" class="btn-activity" data-activity="refactor" disabled
+            title="Refactor the code (no behavior change)">Refactor</button>
+        <button id="btnExceptions" class="btn-activity" data-activity="exceptions" disabled
+            title="Harden exception handling">Handle exceptions</button>
+    </div>
+
+    <input hidden id="prompt" type="text" placeholder="Enter prompt" size="60" /><br>
+    <label>Branches: <input type="number" id="versionCount" value="1" min="1" max="10" style="width: 50px;" /></label>
+    <button hidden onclick="sendPrompt()">Generate</button>
+    <div id="log"></div>
+    
+    <hr>
+
+    <h2>Code Similarity</h2>
+    <div style="width:100px;" id="similarities"></div>
+    <hr>
+    <h2>Code metrics</h2>
+    <div id="metrics"></div>
+    <hr>
+    <h2>Prompts and outputs</h2>
+    <div id="output"></div>
+    <hr>
+    <div style="margin:6px 0; display:flex; flex-wrap:wrap; gap:8px;">
+        <label>LM_Studio URL:
+            <input id="baseUrlInput" type="text" size="40" placeholder="http://localhost:1234/v1" />
+        </label>
+        <label>Model:
+            <input id="modelInput" type="text" size="40" placeholder="qwen/qwen2.5-coder-3b-instruct" />
+        </label>
+    </div>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+
+        document.getElementById('btnExportJson').addEventListener('click', () => {
+            vscode.postMessage({ command: 'exportJSON' });
+        });
+
+        document.getElementById('btnImportJson').addEventListener('click', () => {
+            vscode.postMessage({ command: 'importJSON' });
+        });
+
+        function sendPrompt() {
+            const prompt = document.getElementById('prompt').value;
+            const code = document.getElementById('code').value;
+            const baseUrl = document.getElementById('baseUrlInput').value || '';
+            const model = document.getElementById('modelInput').value || '';
+
+
+            const versionCount = parseInt(document.getElementById('versionCount').value) || 1;
+            vscode.postMessage({ command: 'generate', prompt, code, versionCount, activity: 'custom', baseUrl, model });
+            document.getElementById('log').innerHTML = '<p class="loading">Generating...</p>';
+        }
+
+        //**
+        //  Render metrics and similarities
+        //**
+        function escapeHtml(s) {
+            return String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+        }
+
+        function renderSimilarities(baseNode, similarities) {
+            const box = document.getElementById('similarities');
+            if (!box) return;
+
+            if (!baseNode || !baseNode.isLeaf) {
+                box.innerHTML = '<em>No leaf node selected.</em>';
+                return;
+            }
+
+            if (!similarities || similarities.length === 0) {
+                box.innerHTML = `<div><strong>Node #${baseNode.id}</strong> is a leaf. No other leafs to compare.</div>`;
+                return;
+            }
+
+            const rows = similarities.map(s =>
+                `<tr>
+        <td>#${s.id}</td>
+        <td style="text-align:right">${(s.similarity || 0).toFixed(4)}</td>
+      </tr>`
+            ).join('');
+
+            box.innerHTML = `
+      <div style="margin-top:8px">
+        <div><strong>Base leaf:</strong> #${baseNode.id}</div>
+        <table style="width:100%; border-collapse: collapse; margin-top:6px">
+          <thead>
+            <tr>
+              <th style="text-align:left; border-bottom:1px solid #ddd">Leaf Node</th>
+              <th style="text-align:right; border-bottom:1px solid #ddd">Cosine</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+
+        }
+
+        function renderLizardMetrics(node) {
+            const box = document.getElementById('metrics');
+            if (!box) return;
+
+            if (!node) {
+                box.innerHTML = '';
+                return;
+            }
+
+            const m = node.lizard;
+            if (!m) {
+                box.innerHTML = `<div style="margin-top:10px"><strong>Lizard metrics:</strong> <em>Not available for node #${node.id}</em></div>`;
+                return;
+            }
+
+            // Small summary, then full JSON prettified (collapsible)
+            const fnCount = m.function_count ?? (m.functions ? m.functions.length : undefined);
+            const summary = `
+      <div><strong>File:</strong> ${escapeHtml(m.filename ?? '')}</div>
+      <div><strong>NLOC:</strong> ${m.nloc ?? '-'}</div>
+      <div><strong>Token count:</strong> ${m.token_count ?? '-'}</div>
+      <div><strong>Functions:</strong> ${fnCount ?? '-'}</div>
+      <div><strong>Average CCN:</strong> ${m.average_ccn ?? '-'}</div>
+    `;
+
+            const pretty = escapeHtml(JSON.stringify(m, null, 2));
+            box.innerHTML = `
+      <div style="margin-top:10px">
+        <strong>Lizard metrics for node #${node.id}:</strong>
+        <div style="margin-top:6px">${summary}</div>
+        <details style="margin-top:8px">
+          <summary>Full JSON</summary>
+          <pre class="code-block" style="max-height:260px; overflow:auto">${pretty}</pre>
+        </details>
+      </div>
+    `;
+        }
+        //**
+
+        window.addEventListener('message', event => {
+            const message = event.data;
+
+            if (message.command === 'setInitialCode') {
+                document.getElementById('code').value = message.code;
+            }
+
+            if (message.command === 'loading') {
+                document.getElementById('log').innerHTML = '<p class="loading">' + message.text + '</p>';
+            }
+
+            if (message.command === 'historyUpdate') {
+                const log = document.getElementById('log');
+                log.innerHTML = '';
+                const container = document.getElementById('output');
+                container.innerHTML = '';
+
+                message.history.forEach((state, index) => {
+                    const block = document.createElement('div');
+                    block.className = 'code-block';
+                    const escapedCode = state.code.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+                    block.innerHTML =
+                        '<div class="version-label">#' + state.id + ' - Prompt: ' + state.prompt + '</div>' +
+                        '<pre>' + escapedCode + '</pre>' +
+                        '<button onclick="trimTo(' + state.id + ')">✂ Trim to this</button>';
+                    container.appendChild(block);
+                });
+            }
+
+            if (message.command === 'urlmodelUpdate') {
+                const baseUrlInput = document.getElementById('baseUrlInput');
+                const modelInput = document.getElementById('modelInput');
+                if (baseUrlInput && message.baseUrl) baseUrlInput.value = message.baseUrl;
+                if (modelInput && message.LLMmodel) modelInput.value = message.LLMmodel;
+            }
+
+            if (message.command === 'leafSimilarities') {
+                // message.node: comlete node selected
+                // message.similarities: [{ id, similarity }, ...]
+                renderSimilarities(message.node, message.similarities);
+                renderLizardMetrics(message.node);
+
+                // Apply similarity heatmap borders only if there are similarities
+                if (message?.node && Array.isArray(message.similarities) && message.similarities.length) {
+                    applySimilarityBorders(message.node.id, message.similarities);
+                } else {
+                    resetAllBordersToBaseline(); // non-leaf or no data
+                }
+            }
+        });
+
+
+        // --- Helpers: baseline + similarity heatmap ---
+        function resetAllBordersToBaseline() {
+            if (!window.bonsaiCyRef) return;
+            window.bonsaiCyRef.nodes().forEach(n => {
+                n.removeStyle('border-color');
+                n.removeStyle('border-width');
+            });
+        }
+
+        /** Map similarity in [min,max] to blue→red rgb */
+        function simToHeatColor(sim, minSim, maxSim) {
+            let t = (maxSim === minSim) ? 0.5 : (sim - minSim) / (maxSim - minSim);
+            t = Math.max(0, Math.min(1, t));
+
+            const r = Math.round(255 * t);         // 0 → 255
+            const g = Math.round(255 * t);         // 0 → 255
+            const b = Math.round(255 * (1 - t));   // 255 → 0
+
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function applySimilarityBorders(baseNodeId, similarities) {
+            if (!window.bonsaiCyRef || !similarities || similarities.length === 0) return;
+
+            // Clear previous inline styles so stylesheet/base apply
+            resetAllBordersToBaseline();
+
+            const sims = similarities.map(s => s.similarity);
+
+            similarities.forEach(({ id, similarity }) => {
+                if (id === baseNodeId) return; // don't touch the base; let .selected show yellow
+                const node = window.bonsaiCyRef.getElementById('n' + id);
+                if (node && node.nonempty()) {
+                    node.style('border-color', simToHeatColor(similarity, 0, 1));
+                    node.style('border-width', 20);
+                }
+            });
+        }
+
+        function trimTo(id) {
+            vscode.postMessage({ command: 'trim', id });
+        }
+    </script>
+
+
+    <script src="https://unpkg.com/cytoscape@3.24.0/dist/cytoscape.min.js"></script>
+    <script>
+        window.addEventListener('message', event => {
+            const message = event.data;
+            if (message.command === 'renderGraph') {
+                vscode.postMessage({ command: 'unselectNode' });
+
+                console.log('Rendering graph:', message.graph);
+                cleanupAllTooltips();
+                const cy = cytoscape({
+                    container: document.getElementById('graph'),
+                    elements: [
+                        ...message.graph.nodes,
+                        ...message.graph.edges
+                    ],
+                    style: [
+                        {
+                            selector: 'node',
+                            style: {
+                                'label': 'data(label)',
+                                'background-color': 'data(activityColor)',
+                                'border-color': 'data(activityColor)',
+                                'color': '#fff',
+                                'text-valign': 'center',
+                                'text-halign': 'center',
+                                'border-width': 20,
+                                //'border-color': '#333',
+                                'width': 'data(size)',
+                                'height': 'data(size)',
+                            }
+                        },
+                        {
+                            selector: '.selected',
+                            style: {
+                                'border-width': 20,
+                                'border-color': 'yellow',
+                                'overlay-color': 'yellow',
+                                'overlay-opacity': 0.2,   // transparent halo
+                                'overlay-padding': 20     // halo size around the node
+                            }
+                        },
+                        {
+                            selector: 'edge',
+                            style: {
+                                'width': 2,
+                                'line-color': '#ccc',
+                                'target-arrow-color': '#ccc',
+                                'target-arrow-shape': 'triangle'
+                            }
+                        }
+                    ],
+                    layout: {
+                        name: 'breadthfirst',
+                        directed: true,
+                        padding: 10,
+                        spacingFactor: 1.5,
+                        orientation: 'vertical',
+                        nodeDimensionsIncludeLabels: true,
+                        animate: false,
+                        transform: (node, position) => ({
+                            x: position.x,
+                            y: -position.y
+                        })
+                    }
+                });
+
+                window.bonsaiCyRef = cy;
+
+                cy.on('cxttap', 'node', evt => {
+                    const id = evt.target.id().slice(1);
+                    vscode.postMessage({ command: 'unselectNode' });
+                    vscode.postMessage({ command: 'trim', id: parseInt(id) });
+                });
+
+                cy.on('tap', 'node', evt => {
+                    // Reset borders back to baseline before applying any new similarity map
+                    resetAllBordersToBaseline();
+
+                    const id = evt.target.id().slice(1);
+                    vscode.postMessage({ command: 'selectNode', id: parseInt(id) });
+                    cy.nodes().forEach(n => n.removeClass('selected'));
+                    evt.target.addClass('selected');
+
+                    const codeInput = document.getElementById('code');
+                    const promptInput = document.getElementById('prompt');
+                    const code = evt.target.data('code');
+                    const prompt = evt.target.data('prompt');
+                    if (codeInput) codeInput.value = code;
+                    if (promptInput) promptInput.value = prompt;
+
+                    const reasoningPanel = document.getElementById('reasoningPanel');
+                    const reasoningContent = document.getElementById('reasoningContent');
+                    const reasoning = (evt.target.data('reasoning') || '').toString();
+                    const escape = s => s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+
+                    if (reasoning && reasoning.trim().length > 0) {
+                        reasoningContent.innerHTML = escape(reasoning);
+                        // keep it collapsed by default; uncomment next line to auto-open
+                        // reasoningPanel.setAttribute('open','');
+                        reasoningPanel.style.display = '';
+                    } else {
+                        reasoningContent.textContent = '';
+                        reasoningPanel.removeAttribute('open');
+                        reasoningPanel.style.display = 'none';
+                    }
+                });
+
+                // After cy is created...
+                const container = document.getElementById('graph');
+                const containerRect = () => container.getBoundingClientRect();
+
+                // Hide all tooltips when mouse leaves the canvas entirely
+                container.addEventListener('mouseleave', hideAllTooltips);
+
+                // Also hide all tooltips on pan/zoom (optional but nice)
+                cy.on('pan zoom', hideAllTooltips);
+
+                // Build one tooltip per node
+                cy.nodes().forEach(n => {
+                    const code = n.data('code') || '';
+                    const label = n.data('label') || '';
+                    const activity = n.data('activity') || '';
+
+                    const html = `<div style="white-space: pre-wrap; max-width: 360px;">
+                    <strong>${label}: ${activity}</strong><br>
+                    <pre style="margin:0;">${code.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</pre>
+                    </div>`;
+
+                    const tip = createTooltipEl(html);
+                    tooltipsById.set(n.id(), tip);
+
+                    // Show on mouseover; position using container rect + renderedPosition
+                    n.on('mouseover', (e) => {
+                        const pos = e.target.renderedPosition();
+                        const rect = containerRect();
+                        // Offset a bit to the right/down from the node center
+                        tip.style.left = (rect.left + pos.x + 10) + 'px';
+                        tip.style.top = (rect.top + pos.y + 10) + 'px';
+                        tip.style.display = 'block';
+                    });
+
+                    n.on('mouseout', () => {
+                        tip.style.display = 'none';
+                    });
+
+                    // If node is removed (e.g., trim), delete its tooltip
+                    n.on('remove', () => {
+                        if (tip && tip.parentNode) tip.parentNode.removeChild(tip);
+                        tooltipsById.delete(n.id());
+                    });
+                });
+            }
+        });
+
+        // --- Tooltip utils ---
+        const tooltipsById = new Map(); // key: cytoscape node id -> HTMLDivElement
+
+        function createTooltipEl(html) {
+            const el = document.createElement('div');
+            el.className = 'bonsai-qtip';
+            el.style.position = 'fixed';          // use fixed + rect to avoid scroll mismatch
+            el.style.background = '#333';
+            el.style.color = '#fff';
+            el.style.padding = '6px';
+            el.style.borderRadius = '4px';
+            el.style.fontSize = '12px';
+            el.style.display = 'none';
+            el.style.zIndex = 1000;
+            el.innerHTML = html;
+            document.body.appendChild(el);
+            return el;
+        }
+
+        function hideAllTooltips() {
+            for (const el of tooltipsById.values()) el.style.display = 'none';
+        }
+
+        function cleanupAllTooltips() {
+            for (const el of tooltipsById.values()) {
+                if (el && el.parentNode) el.parentNode.removeChild(el);
+            }
+            tooltipsById.clear();
+        }
+    </script>
+
+    <script>
+        // --- Activity templates (only CODE context is sent by the extension; we only build the prompt) ---
+        const ACTIVITY_TEMPLATES = {
+            fix_with_context: (problem) => `
+            You are an expert software engineer. You will be given CODE (from the user) and a PROBLEM DESCRIPTION (below).
+            Your task is to FIX the code to solve ONLY the described problem, keeping behavior otherwise unchanged.
+            - Keep the public API stable unless strictly needed.
+            - Prefer minimal, targeted changes with clear rationale.
+            - If tests exist, preserve them; if not, keep code testable.
+
+            PROBLEM DESCRIPTION:
+            ${problem}`.trim(),
+
+            fix_without_context: () => `
+            You are an expert software engineer. You will be given CODE (from the user).
+            First, infer the most likely primary defect or weakness, then FIX it with minimal, targeted changes.
+            - Keep behavior otherwise unchanged.
+            - Keep the public API stable unless strictly needed.
+            - Make the code testable and maintainable.
+            `.trim(),
+
+            gen_tests: () => `
+            You are a senior engineer. Your task is to APPEND unit tests to the provided source code, WITHOUT modifying the source. STRICTLY follow these rules:
+            - INCLUDE in the answer the original source code in the prompt. Do NOT change, reorder, format, or delete any line of the original source.
+            - Cover the fixed behavior and edge cases. Prefer small, isolated tests.
+            - Include any necessary test doubles.
+            `.trim(),
+
+            refactor: () => `
+            Refactor the given CODE to improve readability, maintainability, and structure WITHOUT changing behavior.
+            - Apply small, safe refactorings (naming, decomposition, DRY, cohesion, comments where useful).
+            - Do not change external behavior or public API.
+            `.trim(),
+
+            exceptions: () => `
+            Harden the given CODE with robust error/exception handling.
+            - Add meaningful exceptions and messages.
+            - Avoid blanket catches; keep failures observable.
+            - Do not change external behavior except to handle errors gracefully.
+            `.trim(),
+        };
+
+        // --- Flow state: enforce that one of the initial activities runs first ---
+        let initialActivityDone = false;
+
+        function setFollowupEnabled(enabled) {
+            document.getElementById('btnGenTests').disabled = !enabled;
+            document.getElementById('btnRefactor').disabled = !enabled;
+            document.getElementById('btnExceptions').disabled = !enabled;
+        }
+
+        function setInitialFixEnabled(enabled) {
+            document.getElementById('btnFixWith').disabled = !enabled;
+            document.getElementById('btnFixNoCtx').disabled = !enabled;
+            document.getElementById('problemDescDiv').style.display = enabled ? 'block' : 'none';
+        }
+
+        function resetFlow() {
+            initialActivityDone = false;
+            setInitialFixEnabled(true);
+            setFollowupEnabled(false);
+        }
+
+        window.addEventListener('message', (event) => {
+            const message = event.data;
+            if (message.command === 'setActivityFlow') {
+                initialActivityDone = message.initialDone;
+                setInitialFixEnabled(!initialActivityDone);
+                setFollowupEnabled(initialActivityDone);
+            }
+        });
+
+        // document.getElementById('btnResetFlow').addEventListener('click', resetFlow);
+
+        // Helpers: pull UI state
+        function getBaseCode() {
+            return document.getElementById('code').value;
+        }
+        function getVersionCount() {
+            const v = parseInt(document.getElementById('versionCount').value, 10);
+            return Number.isFinite(v) && v > 0 ? v : 1;
+        }
+
+        // Generic runner
+        function runActivity(activityKey) {
+            let prompt = '';
+            if (activityKey === 'fix_with_context') {
+                const problem = (document.getElementById('problemDesc').value || '').trim();
+                if (!problem) {
+                    console.log('Please provide a problem description for "Fix with problem description".');
+                    return;
+                }
+                prompt = ACTIVITY_TEMPLATES.fix_with_context(problem);
+            } else if (activityKey === 'fix_without_context') {
+                prompt = ACTIVITY_TEMPLATES.fix_without_context();
+            } else if (activityKey === 'gen_tests') {
+                if (!initialActivityDone) { console.log('Run one initial activity first.'); return; }
+                prompt = ACTIVITY_TEMPLATES.gen_tests();
+            } else if (activityKey === 'refactor') {
+                if (!initialActivityDone) { console.log('Run one initial activity first.'); return; }
+                prompt = ACTIVITY_TEMPLATES.refactor();
+            } else if (activityKey === 'exceptions') {
+                if (!initialActivityDone) { console.log('Run one initial activity first.'); return; }
+                prompt = ACTIVITY_TEMPLATES.exceptions();
+            } else {
+                console.warn('Unknown activity:', activityKey);
+                return;
+            }
+
+            // Block all activities until new code is received and the user selects a node
+            setInitialFixEnabled(false);
+            setFollowupEnabled(false);
+
+            // Post to VS Code extension (reuse your generate message)
+            const baseUrl = document.getElementById('baseUrlInput').value || '';
+            const model = document.getElementById('modelInput').value || '';
+
+            vscode.postMessage({
+                command: 'generate',
+                prompt,
+                code: getBaseCode(),
+                versionCount: getVersionCount(),
+                activity: activityKey,
+                baseUrl,
+                model
+            });
+
+            // Optional: show loading immediately
+            document.getElementById('log').innerHTML = '<p class="loading">Generating...</p>';
+        }
+
+        // Wire buttons
+        document.getElementById('btnFixWith').addEventListener('click', () => runActivity('fix_with_context'));
+        document.getElementById('btnFixNoCtx').addEventListener('click', () => runActivity('fix_without_context'));
+        document.getElementById('btnGenTests').addEventListener('click', () => runActivity('gen_tests'));
+        document.getElementById('btnRefactor').addEventListener('click', () => runActivity('refactor'));
+        document.getElementById('btnExceptions').addEventListener('click', () => runActivity('exceptions'));
+
+        // Initialize
+        resetFlow();
+    </script>
+
+</body>
+
+</html>
