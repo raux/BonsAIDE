@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bonsai IDE</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+
+<body>
+    <h2>
+        Bonsai IDE
+        <span id="connectionStatus" class="disconnected">○ Connecting…</span>
+    </h2>
+
+    <!-- Activity legend -->
+    <div class="legend">
+        <span class="pill"><span class="swatch fix_with_context"></span>Fix with description</span>
+        <span class="pill"><span class="swatch fix_without_context"></span>Fix w/o description</span>
+        <span class="pill"><span class="swatch gen_tests"></span>Generate tests</span>
+        <span class="pill"><span class="swatch refactor"></span>Refactor</span>
+        <span class="pill"><span class="swatch exceptions"></span>Handle exceptions</span>
+        <span class="pill"><span class="swatch other"></span>Other</span>
+        <span class="pill">
+            <span class="swatch gradient"></span>Border: Code Similarity (Less → More)
+        </span>
+    </div>
+
+    <!-- Bonsai graph -->
+    <div id="graph" style="width:100%; height:500px; border:1px solid #ddd;"></div>
+
+    <button id="btnExportJson" title="Export current Bonsai as JSON">Export JSON</button>
+    <button id="btnImportJson" title="Import Bonsai from JSON">Import JSON</button>
+
+    <h2>Source code of the node selected</h2>
+    <textarea style="width:100%;" id="code" rows="10" cols="60"># Paste or type your code here, then select this node and run an activity.</textarea>
+
+    <!-- Collapsible reasoning panel -->
+    <details id="reasoningPanel" style="margin-top:8px; display:none;">
+        <summary style="cursor:pointer; font-weight:600;">Reasoning</summary>
+        <pre id="reasoningContent" class="code-block" style="max-height:280px; overflow:auto; margin-top:6px;"></pre>
+    </details>
+
+    <hr>
+
+    <!-- Activities -->
+    <h2>Activities</h2>
+    <div id="problemDescDiv" style="margin:8px 0;">
+        <label style="display:block; font-weight:600;">
+            Problem description (for the "with context" activity):
+        </label>
+        <textarea id="problemDesc" rows="4" cols="60"
+            placeholder="Describe the bug / failure scenario / expected behavior…"></textarea>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+        <span style="font-weight:600;">Initial (run one of these first):</span>
+        <button id="btnFixWith" class="btn-activity" data-activity="fix_with_context"
+            title="Fix the problem using the provided problem description">Fix with problem description</button>
+        <button id="btnFixNoCtx" class="btn-activity" data-activity="fix_without_context"
+            title="Fix the problem without a provided description; infer it from code/tests">Fix without description</button>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <span style="font-weight:600;">Then:</span>
+        <button id="btnGenTests" class="btn-activity" data-activity="gen_tests" disabled
+            title="Generate unit tests">Generate tests</button>
+        <button id="btnRefactor" class="btn-activity" data-activity="refactor" disabled
+            title="Refactor the code (no behavior change)">Refactor</button>
+        <button id="btnExceptions" class="btn-activity" data-activity="exceptions" disabled
+            title="Harden exception handling">Handle exceptions</button>
+    </div>
+
+    <input hidden id="prompt" type="text" placeholder="Enter prompt" size="60">
+    <label>Branches: <input type="number" id="versionCount" value="1" min="1" max="10" style="width:50px;"></label>
+    <div id="log"></div>
+
+    <hr>
+
+    <h2>Code Similarity</h2>
+    <div style="width:100px;" id="similarities"></div>
+
+    <hr>
+    <h2>Code metrics</h2>
+    <div id="metrics"></div>
+
+    <hr>
+    <h2>Prompts and outputs</h2>
+    <div id="output"></div>
+
+    <hr>
+    <div style="margin:6px 0; display:flex; flex-wrap:wrap; gap:8px;">
+        <label>LM Studio URL:
+            <input id="baseUrlInput" type="text" size="40" placeholder="localhost:1234/v1">
+        </label>
+        <label>Model:
+            <input id="modelInput" type="text" size="40" placeholder="qwen/qwen2.5-coder-3b-instruct">
+        </label>
+    </div>
+
+    <!-- Cytoscape.js (graph library) -->
+    <script src="https://unpkg.com/cytoscape@3.24.0/dist/cytoscape.min.js"></script>
+    <!-- BonsAIDE frontend application -->
+    <script src="/js/app.js"></script>
+</body>
+
+</html>

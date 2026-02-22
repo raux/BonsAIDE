@@ -518,7 +518,22 @@ function serveFile(res: http.ServerResponse, filePath: string, contentType: stri
   }
 }
 
-const MEDIA_DIR = path.join(__dirname, '..', 'media');
+/** Root of the standalone web frontend (client/ directory) */
+const CLIENT_DIR = path.join(__dirname, '..', 'client');
+
+/** Map common file extensions to MIME types */
+function mimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.html': return 'text/html; charset=utf-8';
+    case '.css':  return 'text/css; charset=utf-8';
+    case '.js':   return 'application/javascript; charset=utf-8';
+    case '.json': return 'application/json';
+    case '.png':  return 'image/png';
+    case '.svg':  return 'image/svg+xml';
+    default:      return 'application/octet-stream';
+  }
+}
 
 function createServer(): http.Server {
   return http.createServer(async (req, res) => {
@@ -537,11 +552,26 @@ function createServer(): http.Server {
     }
 
     // -----------------------------------------------------------------------
-    // GET /  →  serve the Bonsai UI
+    // GET /  →  serve the standalone web frontend (client/index.html)
     // -----------------------------------------------------------------------
     if (method === 'GET' && url === '/') {
-      const htmlPath = path.join(MEDIA_DIR, 'webview.html');
-      serveFile(res, htmlPath, 'text/html; charset=utf-8');
+      serveFile(res, path.join(CLIENT_DIR, 'index.html'), 'text/html; charset=utf-8');
+      return;
+    }
+
+    // -----------------------------------------------------------------------
+    // GET /css/* and /js/*  →  static assets for the web frontend
+    // -----------------------------------------------------------------------
+    if (method === 'GET' && (url.startsWith('/css/') || url.startsWith('/js/'))) {
+      // Prevent path traversal: resolve both paths and verify containment
+      const filePath = path.resolve(CLIENT_DIR, url.slice(1));
+      const resolvedClientDir = path.resolve(CLIENT_DIR);
+      if (!filePath.startsWith(resolvedClientDir + path.sep) && filePath !== resolvedClientDir) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+      }
+      serveFile(res, filePath, mimeType(filePath));
       return;
     }
 

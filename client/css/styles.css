@@ -1,0 +1,142 @@
+/* ============================================================
+   BonsAIDE – standalone web frontend styles
+   ============================================================ */
+
+/* Activity palette (must match getActivityColor() in server.ts) */
+:root {
+    --color-fix-with:      #834632;
+    --color-fix-nocontext: #83675e;
+    --color-tests:         #970071;
+    --color-refactor:      #006d18;
+    --color-exceptions:    #00b0b6;
+    --color-other:         #777777;
+}
+
+/* ---- Layout ------------------------------------------------ */
+body {
+    font-family: system-ui, sans-serif;
+    margin: 0;
+    padding: 16px;
+    background: #f5f5f5;
+    color: #222;
+}
+
+h2 {
+    margin: 16px 0 8px;
+    font-size: 1.1rem;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 12px 0;
+}
+
+textarea {
+    font-family: monospace;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+/* ---- Code block ------------------------------------------- */
+.code-block {
+    border: 1px solid #ccc;
+    padding: 10px;
+    margin: 10px 0;
+    white-space: pre-wrap;
+    background: #f9f9f9;
+    border-radius: 4px;
+}
+
+/* ---- Status / loading ------------------------------------- */
+.loading {
+    font-style: italic;
+    color: #888;
+}
+
+.version-label {
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+/* ---- Activity buttons ------------------------------------- */
+.btn-activity {
+    appearance: none;
+    border: 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--btn-color, #7f7f7f);
+    cursor: pointer;
+    transition: transform .05s ease, filter .15s ease, opacity .15s ease;
+}
+
+.btn-activity:hover  { transform: translateY(-1px); }
+.btn-activity:active { transform: translateY(0); }
+.btn-activity:disabled {
+    cursor: not-allowed;
+    filter: grayscale(35%) opacity(.8);
+}
+
+.btn-activity[data-activity="fix_with_context"]    { --btn-color: var(--color-fix-with); }
+.btn-activity[data-activity="fix_without_context"] { --btn-color: var(--color-fix-nocontext); }
+.btn-activity[data-activity="gen_tests"]           { --btn-color: var(--color-tests); }
+.btn-activity[data-activity="refactor"]            { --btn-color: var(--color-refactor); }
+.btn-activity[data-activity="exceptions"]          { --btn-color: var(--color-exceptions); }
+
+/* ---- Legend ----------------------------------------------- */
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 2px;
+}
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    color: #222;
+    background: #f3f3f3;
+    border: 1px solid #ddd;
+}
+
+.swatch {
+    display: inline-block;
+    width: 20px;
+    height: 12px;
+    border-radius: 6px;
+}
+
+.swatch.gradient {
+    width: 60px;
+    background: linear-gradient(to right, blue, yellow);
+    border: 1px solid #ccc;
+}
+
+.swatch.fix_with_context    { background: var(--color-fix-with); }
+.swatch.fix_without_context { background: var(--color-fix-nocontext); }
+.swatch.gen_tests           { background: var(--color-tests); }
+.swatch.refactor            { background: var(--color-refactor); }
+.swatch.exceptions          { background: var(--color-exceptions); }
+.swatch.other               { background: var(--color-other); }
+
+/* ---- Connection status badge ------------------------------ */
+#connectionStatus {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #eee;
+    border: 1px solid #ccc;
+    margin-left: 8px;
+}
+
+#connectionStatus.connected    { background: #d4edda; border-color: #28a745; color: #155724; }
+#connectionStatus.disconnected { background: #f8d7da; border-color: #dc3545; color: #721c24; }

@@ -83,7 +83,7 @@ async function isLizardAvailable(pyCmd: string): Promise<boolean> {
     await execFilePromise(pyCmd, ['-c', 'import lizard']);
     return true;
   } catch (error) {
-    console.log('Lizard is not available:', error);
+    console.log('Lizard not yet installed; will install automatically.');
     return false;
   }
 }
