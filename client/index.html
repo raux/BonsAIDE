@@ -90,13 +90,15 @@
     <div id="output"></div>
 
     <hr>
-    <div style="margin:6px 0; display:flex; flex-wrap:wrap; gap:8px;">
+    <div style="margin:6px 0; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
         <label>LM Studio URL:
             <input id="baseUrlInput" type="text" size="40" placeholder="localhost:1234/v1">
         </label>
         <label>Model:
             <input id="modelInput" type="text" size="40" placeholder="qwen/qwen2.5-coder-3b-instruct">
         </label>
+        <button id="btnTestConnection" title="Test connection to LM Studio" aria-label="Test connection to LM Studio">Test Connection</button>
+        <span id="connectionTestStatus" aria-live="polite"></span>
     </div>
 
     <!-- Cytoscape.js (graph library) -->

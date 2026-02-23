@@ -106,6 +106,17 @@ document.getElementById('btnImportJson').addEventListener('click', function () {
     vscode.postMessage({ command: 'importJSON' });
 });
 
+document.getElementById('btnTestConnection').addEventListener('click', function () {
+    const baseUrl = document.getElementById('baseUrlInput').value || '';
+    const model = document.getElementById('modelInput').value || '';
+    const statusEl = document.getElementById('connectionTestStatus');
+    if (statusEl) {
+        statusEl.textContent = 'Testing...';
+        statusEl.className = 'connection-testing';
+    }
+    vscode.postMessage({ command: 'testConnection', baseUrl: baseUrl, model: model });
+});
+
 /* =============================================================
    3.  General helpers
    ============================================================= */
@@ -262,6 +273,14 @@ window.addEventListener('message', function (event) {
         const modelInput = document.getElementById('modelInput');
         if (baseUrlInput && message.baseUrl) { baseUrlInput.value = message.baseUrl; }
         if (modelInput && message.LLMmodel) { modelInput.value = message.LLMmodel; }
+    }
+
+    if (message.command === 'connectionTestResult') {
+        const statusEl = document.getElementById('connectionTestStatus');
+        if (statusEl) {
+            statusEl.textContent = message.message;
+            statusEl.className = message.success ? 'connection-success' : 'connection-error';
+        }
     }
 
     if (message.command === 'leafSimilarities') {
