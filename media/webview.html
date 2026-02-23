@@ -228,7 +228,82 @@
     </div>
 
     <script>
-        const vscode = acquireVsCodeApi();
+        /**
+         * vscode compatibility shim.
+         *
+         * When running inside a VS Code Webview, acquireVsCodeApi() is available and
+         * we use it directly (original behaviour, unchanged).
+         *
+         * When running as a standalone web page served by the BonsAIDE HTTP server
+         * (npm run serve), acquireVsCodeApi is not defined.  In that case we create a
+         * drop-in replacement that:
+         *  - Sends messages to the server via HTTP POST /message
+         *  - Receives messages from the server via a Server-Sent Events stream on GET /events
+         *  - Intercepts exportJSON to trigger a browser download (GET /export)
+         *  - Intercepts importJSON to open a <input type="file"> picker, reads the
+         *    chosen file, and POSTs its content to POST /message with command importJSON
+         */
+        const vscode = (function () {
+            if (typeof acquireVsCodeApi === 'function') {
+                return acquireVsCodeApi();
+            }
+
+            // ---- Standalone web mode ----
+
+            // SSE: server → browser
+            const evtSource = new EventSource('/events');
+            evtSource.onmessage = function (e) {
+                try {
+                    const msg = JSON.parse(e.data);
+                    window.dispatchEvent(new MessageEvent('message', { data: msg }));
+                } catch (err) { console.error('SSE parse error', err); }
+            };
+            evtSource.onerror = function () {
+                console.warn('SSE connection lost; will retry automatically.');
+            };
+
+            // Hidden file input for importing a JSON file
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.json';
+            fileInput.style.display = 'none';
+            document.body.appendChild(fileInput);
+            fileInput.addEventListener('change', function () {
+                const file = fileInput.files && fileInput.files[0];
+                if (!file) { return; }
+                const reader = new FileReader();
+                reader.onload = function (ev) {
+                    fetch('/message', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ command: 'importJSON', content: ev.target.result })
+                    }).catch(err => console.error('Import POST error', err));
+                };
+                reader.readAsText(file);
+                fileInput.value = ''; // reset for re-use
+            });
+
+            return {
+                postMessage: function (msg) {
+                    // Export: trigger a browser download instead of VS Code save dialog
+                    if (msg.command === 'exportJSON') {
+                        window.location.href = '/export';
+                        return;
+                    }
+                    // Import: open a file picker instead of VS Code open dialog
+                    if (msg.command === 'importJSON') {
+                        fileInput.click();
+                        return;
+                    }
+                    // All other messages go to the server via POST
+                    fetch('/message', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(msg)
+                    }).catch(err => console.error('Message POST error', err));
+                }
+            };
+        })();
 
         document.getElementById('btnExportJson').addEventListener('click', () => {
             vscode.postMessage({ command: 'exportJSON' });
@@ -267,7 +342,7 @@
             }
 
             if (!similarities || similarities.length === 0) {
-                box.innerHTML = `<div><strong>Node #${baseNode.id}</strong> is a leaf. No other leafs to compare.</div>`;
+                box.innerHTML = `<div><strong>Node #${baseNode.id}</strong> is a leaf. No other leaves to compare.</div>`;
                 return;
             }
 

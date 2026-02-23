@@ -37,7 +37,9 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "compile-server": "tsc -p tsconfig.server.json",
+    "serve": "npm run compile-server && node out-server/server.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.102.0",
