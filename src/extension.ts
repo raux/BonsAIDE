@@ -69,7 +69,7 @@ function getPersistedState(context: vscode.ExtensionContext): {
       activeBranchId: typeof raw.activeBranchId === 'string' ? raw.activeBranchId : null,
       currentId: typeof raw.currentId === 'number' ? raw.currentId : 0,
       baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : 'localhost:1234/v1',
-      LLMmodel: typeof raw.LLMmodel === 'string' ? raw.LLMmodel : 'qwen/qwen2.5-coder-3b-instruct',
+      LLMmodel: typeof raw.LLMmodel === 'string' ? raw.LLMmodel : 'deepseek/deepseek-r1-0528-qwen3-8b',
     };
   } catch {
     return null;
