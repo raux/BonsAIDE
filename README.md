@@ -1,7 +1,7 @@
 # 🌳 Bonsai Code
 
-**Bonsai** is a visual **bug-fixing & software-engineering environment** inside VS Code.  
-Start from the **active file**, then apply activities powered by an **LLM** to generate **multiple options** and explore **alternative branches**:
+**Bonsai** is a visual **bug-fixing & software-engineering environment** that runs as a standalone web server.  
+Paste your code, then apply activities powered by an **LLM** to generate **multiple options** and explore **alternative branches**:
 - **Fix the problem** (mandatory first step, with or without a short description)
 - **Generate tests**
 - **Refactor**
@@ -14,26 +14,6 @@ Start from the **active file**, then apply activities powered by an **LLM** to g
 ---
 
 ## Installation
-
-### Option A — Marketplace (when available)
-1. VS Code ➜ **Extensions** view  
-2. Search **“Bonsai”** ➜ **Install**
-
-### Option B — VSIX file
-1. VS Code ➜ **Extensions** (⋯) ➜ **Install from VSIX…**  
-2. Select your `bonsai-*.vsix`
-
-### Option C — From source (this repo)
-```bash
-# In the repo folder
-npm install
-npm run compile
-code .
-# Launch dev host
-# VS Code: press F5
-```
-
-### Option D — Standalone Web Server (no VS Code required)
 
 Run Bonsai as a standalone web server accessible from any browser:
 
@@ -54,68 +34,63 @@ PORT=8080 npm run serve
 npm run serve -- 4000
 ```
 
-> **API key:** set your LM STUDIO url before launching:
->
-> * macOS/Linux: `export BONSAI_LM_URL=your_api_key_here`
-> * Windows (PowerShell): `$env:BONSAI_LM_URL="your_api_key_here"`
+---
 
+## Configuration
 
-> **Model:** set your LM STUDIO model before launching:
->
-> * macOS/Linux: `export BONSAI_LM_MODEL=gpt-oss-20b`
-> * Windows (PowerShell): `$env:BONSAI_LM_MODEL="gpt-oss-20b"`
+### LM Studio URL
+
+Set your LM Studio URL before launching:
+
+* macOS/Linux: `export BONSAI_LM_URL=http://localhost:1234/v1`
+* Windows (PowerShell): `$env:BONSAI_LM_URL="http://localhost:1234/v1"`
+
+### Model
+
+Set your LM Studio model before launching:
+
+* macOS/Linux: `export BONSAI_LM_MODEL=qwen/qwen2.5-coder-3b-instruct`
+* Windows (PowerShell): `$env:BONSAI_LM_MODEL="qwen/qwen2.5-coder-3b-instruct"`
+
+Both values can also be configured interactively in the Bonsai UI.
+
 ---
 
 ## Quick Use
 
-1. Open a source file ➜ **Ctrl/Cmd+Shift+P → “Start Bonsai”** (the active file becomes the first node).
-2. **Always start with *Fix the problem***.
-3. When applying an activity, use the **numeric input** to spawn **N branches** (N≥1) with different options.
-4. Select a **leaf** to see **similarity borders** on other leaves (cool→warm = less→more similar).
-5. Check the **Details** pane (Code, Reasoning, Similarity, Code Metrics).
-6. **Right-click → Trim** to prune a node and its children.
-7. **Export JSON** to save; **Import JSON** to restore.
+1. Open **http://localhost:3000** in your browser after starting the server.
+2. Paste your code in the text area — this becomes the first node.
+3. **Always start with *Fix the problem***.
+4. When applying an activity, use the **numeric input** to spawn **N branches** (N≥1) with different options.
+5. Select a **leaf** to see **similarity borders** on other leaves (cool→warm = less→more similar).
+6. Check the **Details** pane (Code, Reasoning, Similarity, Code Metrics).
+7. **Right-click → Trim** to prune a node and its children.
+8. **Export JSON** to save; **Import JSON** to restore.
 
 ![Selected node](other/img/7.png) <!-- placeholder -->
 ![Activities](other/img/8.png) <!-- placeholder -->
 ![Branches](other/img/9.png) <!-- placeholder -->
 ![Code & Reasoning](other/img/17.png) <!-- placeholder -->
 
-
 ---
 
-## Commands
+## API Endpoints
 
-* **Start Bonsai**: Opens Bonsai IDE panel.
+The server exposes the following HTTP endpoints:
 
----
-
-## Release Notes
-
-### 0.0.4
-
-Get model and LM Studio URL from an input in the Bonsai
-
-### 0.0.3
-
-Save logs when exporting Bonsai.
-
-### 0.0.2
-
-Model selection through environment variable (`export BONSAI_LM_MODEL=gpt-oss-20b`)
-
-### 0.0.1
-
-Initial preview: fix-first workflow, numeric branching, activity colors, similarity borders (leaf), Details pane (code/reasoning/metrics), Trim, Export/Import.
-
-![All](other/img/11.png) <!-- placeholder -->
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Serves the main web UI |
+| `/events` | GET | Server-Sent Events stream for real-time updates |
+| `/message` | POST | Send commands from browser to server |
+| `/export` | GET | Download current session as JSON |
+| `/import` | POST | Upload a previously-exported JSON session |
 
 ---
 
 ## Links
 
-* Quick Start & Tutorial: `TUTORAL.md`
+* Quick Start & Tutorial: `TUTORIAL.md`
 * Repository: [https://gitlab.com/dlumbrer/bonsai-vscode](https://gitlab.com/dlumbrer/bonsai-vscode)
 
-> **Privacy note:** Bonsai can send selected code/prompts to your configured LLM. Don’t include secrets or proprietary data unless permitted.
-
+> **Privacy note:** Bonsai sends code/prompts to your configured LLM. Don't include secrets or proprietary data unless permitted.
