@@ -497,6 +497,11 @@ async function handleMessage(message: any): Promise<void> {
     broadcast({ command: 'loading', text: 'Testing connection...' });
 
     try {
+      // Validate URL format (should be host:port/path pattern)
+      if (!/^[\w.-]+(:\d+)?(\/[\w./]*)?$/.test(testUrl)) {
+        throw new Error('Invalid URL format. Expected format: host:port/path (e.g., localhost:1234/v1)');
+      }
+
       const res = await fetch(`http://${testUrl}/chat/completions`, {
         method: 'POST',
         headers: {
