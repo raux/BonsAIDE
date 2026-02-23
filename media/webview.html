@@ -143,6 +143,17 @@
         .swatch.other {
             background: var(--color-other);
         }
+
+        /* Connection test status */
+        #connectionTestStatus {
+            font-size: 13px;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        #connectionTestStatus.connection-testing { color: #856404; background: #fff3cd; }
+        #connectionTestStatus.connection-success { color: #155724; background: #d4edda; }
+        #connectionTestStatus.connection-error   { color: #721c24; background: #f8d7da; }
     </style>
 
 </head>
@@ -218,13 +229,15 @@
     <h2>Prompts and outputs</h2>
     <div id="output"></div>
     <hr>
-    <div style="margin:6px 0; display:flex; flex-wrap:wrap; gap:8px;">
+    <div style="margin:6px 0; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
         <label>LM_Studio URL:
             <input id="baseUrlInput" type="text" size="40" placeholder="http://localhost:1234/v1" />
         </label>
         <label>Model:
             <input id="modelInput" type="text" size="40" placeholder="qwen/qwen2.5-coder-3b-instruct" />
         </label>
+        <button id="btnTestConnection" title="Test connection to LM Studio">Test Connection</button>
+        <span id="connectionTestStatus"></span>
     </div>
 
     <script>
@@ -311,6 +324,17 @@
 
         document.getElementById('btnImportJson').addEventListener('click', () => {
             vscode.postMessage({ command: 'importJSON' });
+        });
+
+        document.getElementById('btnTestConnection').addEventListener('click', () => {
+            const baseUrl = document.getElementById('baseUrlInput').value || '';
+            const model = document.getElementById('modelInput').value || '';
+            const statusEl = document.getElementById('connectionTestStatus');
+            if (statusEl) {
+                statusEl.textContent = 'Testing...';
+                statusEl.className = 'connection-testing';
+            }
+            vscode.postMessage({ command: 'testConnection', baseUrl, model });
         });
 
         function sendPrompt() {
@@ -443,6 +467,14 @@
                 const modelInput = document.getElementById('modelInput');
                 if (baseUrlInput && message.baseUrl) baseUrlInput.value = message.baseUrl;
                 if (modelInput && message.LLMmodel) modelInput.value = message.LLMmodel;
+            }
+
+            if (message.command === 'connectionTestResult') {
+                const statusEl = document.getElementById('connectionTestStatus');
+                if (statusEl) {
+                    statusEl.textContent = message.message;
+                    statusEl.className = message.success ? 'connection-success' : 'connection-error';
+                }
             }
 
             if (message.command === 'leafSimilarities') {

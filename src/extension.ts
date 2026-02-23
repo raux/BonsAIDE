@@ -552,6 +552,44 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
+        if (message.command === 'testConnection') {
+          const testUrl = message.baseUrl || baseUrl;
+          const testModel = message.model || LLMmodel;
+          bonsaiLog('Testing connection to:', testUrl, 'with model:', testModel);
+          panel.webview.postMessage({ command: 'loading', text: 'Testing connection...' });
+
+          try {
+            const res = await fetch(`http://${testUrl}/chat/completions`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer lm-studio',
+              },
+              body: JSON.stringify({
+                model: testModel,
+                messages: [{ role: 'user', content: 'Say "connected" in one word.' }],
+                temperature: 0,
+                max_tokens: 10,
+                stream: false,
+              }),
+            });
+
+            if (!res.ok) {
+              const text = await res.text().catch(() => '');
+              throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
+            }
+
+            const json: any = await res.json();
+            const output = json?.choices?.[0]?.message?.content?.trim?.() ?? '';
+            bonsaiLog('Connection test successful. Response:', output);
+            panel.webview.postMessage({ command: 'connectionTestResult', success: true, message: `✓ Connected! Model responded: "${output}"` });
+          } catch (err: any) {
+            bonsaiLog('Connection test failed:', err?.message || err);
+            panel.webview.postMessage({ command: 'connectionTestResult', success: false, message: `✗ Connection failed: ${err?.message || err}` });
+          }
+          return;
+        }
+
         if (message.command === 'generate') {
           const selectedNodeIdForPrompt = selectedNodeId;
           let code = message.code;

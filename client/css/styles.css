@@ -140,3 +140,14 @@ textarea {
 
 #connectionStatus.connected    { background: #d4edda; border-color: #28a745; color: #155724; }
 #connectionStatus.disconnected { background: #f8d7da; border-color: #dc3545; color: #721c24; }
+
+/* ---- Connection test status ------------------------------- */
+#connectionTestStatus {
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+#connectionTestStatus.connection-testing { color: #856404; background: #fff3cd; }
+#connectionTestStatus.connection-success { color: #155724; background: #d4edda; }
+#connectionTestStatus.connection-error   { color: #721c24; background: #f8d7da; }
