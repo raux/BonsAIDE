@@ -581,10 +581,14 @@ export function activate(context: vscode.ExtensionContext) {
             const availableModels = modelsJson?.data?.map((m: any) => m.id) ?? [];
             
             // Check if the specified model is available
-            const modelAvailable = availableModels.length === 0 || availableModels.includes(testModel);
-            const modelStatus = modelAvailable 
-              ? `Model "${testModel}" is available.`
-              : `Warning: Model "${testModel}" not found in available models: ${availableModels.join(', ')}`;
+            let modelStatus: string;
+            if (availableModels.length === 0) {
+              modelStatus = `Warning: No models reported by server. Make sure "${testModel}" is loaded.`;
+            } else if (availableModels.includes(testModel)) {
+              modelStatus = `Model "${testModel}" is available.`;
+            } else {
+              modelStatus = `Warning: Model "${testModel}" not found. Available: ${availableModels.join(', ')}`;
+            }
 
             bonsaiLog('Connection test successful. Server reachable.', modelStatus);
             panel.webview.postMessage({ 
