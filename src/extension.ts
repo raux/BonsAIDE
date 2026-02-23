@@ -40,7 +40,7 @@ let activeBranchId: string | null = null;
 let currentId = 0;
 let selectedNodeId: number | null = null;
 let baseUrl: string = 'localhost:1234/v1'; // default LM Studio URL
-let LLMmodel: string = 'qwen/qwen2.5-coder-3b-instruct'; // default model
+let LLMmodel: string = 'deepseek/deepseek-r1-0528-qwen3-8b'; // default model
 
 // --- Persistence helpers ---
 const STORAGE_KEY = 'bonsai.state.v1';
