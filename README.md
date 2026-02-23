@@ -33,6 +33,27 @@ code .
 # VS Code: press F5
 ```
 
+### Option D — Standalone Web Server (no VS Code required)
+
+Run Bonsai as a standalone web server accessible from any browser:
+
+```bash
+# In the repo folder
+npm install
+npm run serve
+# Open http://localhost:3000 in your browser
+```
+
+The server uses port **3000** by default. To use a different port:
+
+```bash
+# Using PORT environment variable
+PORT=8080 npm run serve
+
+# Or pass the port as a CLI argument
+npm run serve -- 4000
+```
+
 > **API key:** set your LM STUDIO url before launching:
 >
 > * macOS/Linux: `export BONSAI_LM_URL=your_api_key_here`
