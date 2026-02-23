@@ -177,7 +177,11 @@
     <button id="btnExportJson" title="Export current Bonsai as JSON">Export JSON</button>
     <button id="btnImportJson" title="Import Bonsai from JSON">Import JSON</button>
 
-    <h2>Source code of the node selected</h2>
+    <h2>Source code or Agent.md of the node selected</h2>
+    <div style="margin-bottom:4px;">
+        <button id="btnLoadAgentMd" title="Load an agent.md file as the input for code generation">📄 Load Agent.md</button>
+        <span id="agentMdFilename" style="margin-left:8px; font-style:italic; color:#666;"></span>
+    </div>
     <textarea style="width: 100%;" id="code" rows="10"
         cols="60">def hello():\n    print(\"Hello, world!\")</textarea><br>
     <!-- Collapsible Reasoning Panel -->
@@ -316,6 +320,31 @@
                     }).catch(err => console.error('Message POST error', err));
                 }
             };
+        })();
+
+        // Agent.md file loading (works in both VS Code and standalone web mode)
+        (function () {
+            const agentMdInputVsc = document.createElement('input');
+            agentMdInputVsc.type = 'file';
+            agentMdInputVsc.accept = '.md,.markdown';
+            agentMdInputVsc.style.display = 'none';
+            document.body.appendChild(agentMdInputVsc);
+            agentMdInputVsc.addEventListener('change', function () {
+                const file = agentMdInputVsc.files && agentMdInputVsc.files[0];
+                if (!file) { return; }
+                const reader = new FileReader();
+                reader.onload = function (ev) {
+                    const codeEl = document.getElementById('code');
+                    if (codeEl) { codeEl.value = ev.target.result; }
+                    const nameEl = document.getElementById('agentMdFilename');
+                    if (nameEl) { nameEl.textContent = file.name; }
+                };
+                reader.readAsText(file);
+                agentMdInputVsc.value = ''; // reset for re-use
+            });
+            document.getElementById('btnLoadAgentMd').addEventListener('click', function () {
+                agentMdInputVsc.click();
+            });
         })();
 
         document.getElementById('btnExportJson').addEventListener('click', () => {
