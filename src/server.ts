@@ -502,30 +502,38 @@ async function handleMessage(message: any): Promise<void> {
         throw new Error('Invalid URL format. Expected format: host:port/path (e.g., localhost:1234/v1)');
       }
 
-      const res = await fetch(`http://${testUrl}/chat/completions`, {
-        method: 'POST',
+      // First, test basic connectivity using the /models endpoint (lightweight, no model execution)
+      const modelsRes = await fetch(`http://${testUrl}/models`, {
+        method: 'GET',
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': 'Bearer lm-studio',
         },
-        body: JSON.stringify({
-          model: testModel,
-          messages: [{ role: 'user', content: 'Say "connected" in one word.' }],
-          temperature: 0,
-          max_tokens: 10,
-          stream: false,
-        }),
       });
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
+      if (!modelsRes.ok) {
+        const text = await modelsRes.text().catch(() => '');
+        throw new Error(`Server not reachable: HTTP ${modelsRes.status} ${modelsRes.statusText}${text ? ` - ${text}` : ''}`);
       }
 
-      const json: any = await res.json();
-      const output = json?.choices?.[0]?.message?.content?.trim?.() ?? '';
-      bonsaiLog('Connection test successful. Response:', output);
-      broadcast({ command: 'connectionTestResult', success: true, message: `✓ Connected! Model responded: "${output}"` });
+      const modelsJson: any = await modelsRes.json();
+      const availableModels = modelsJson?.data?.map((m: any) => m.id) ?? [];
+      
+      // Check if the specified model is available
+      let modelStatus: string;
+      if (availableModels.length === 0) {
+        modelStatus = `Warning: No models reported by server. Make sure "${testModel}" is loaded.`;
+      } else if (availableModels.includes(testModel)) {
+        modelStatus = `Model "${testModel}" is available.`;
+      } else {
+        modelStatus = `Warning: Model "${testModel}" not found. Available: ${availableModels.join(', ')}`;
+      }
+
+      bonsaiLog('Connection test successful. Server reachable.', modelStatus);
+      broadcast({ 
+        command: 'connectionTestResult', 
+        success: true, 
+        message: `✓ Connected to LLM server! ${modelStatus}` 
+      });
     } catch (err: any) {
       bonsaiLog('Connection test failed:', err?.message || err);
       broadcast({ command: 'connectionTestResult', success: false, message: `✗ Connection failed: ${err?.message || err}` });
