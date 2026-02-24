@@ -609,23 +609,48 @@ export function activate(context: vscode.ExtensionContext) {
           LLMmodel = message.model || LLMmodel;
 
           bonsaiLog('Processing Agent.md content, length:', agentMdContent.length);
-          panel.webview.postMessage({ command: 'loading', text: 'Processing Agent.md...' });
+          panel.webview.postMessage({ command: 'loading', text: 'Verifying LLM connection...' });
 
           try {
+            // First, verify LLM connection before processing
+            bonsaiLog('Verifying LLM connection before processing Agent.md');
+            if (!/^[\w.-]+(:\d+)?(\/[\w./]*)?$/.test(baseUrl)) {
+              throw new Error('Invalid URL format. Expected format: host:port/path (e.g., localhost:1234/v1)');
+            }
+
+            const modelsRes = await fetch(`http://${baseUrl}/models`, {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer lm-studio'
+              },
+              signal: AbortSignal.timeout(5000)
+            });
+
+            if (!modelsRes.ok) {
+              throw new Error(`LLM server returned ${modelsRes.status}: ${modelsRes.statusText}`);
+            }
+
+            const modelsData: any = await modelsRes.json();
+            const availableModels = modelsData?.data?.map((m: any) => m.id) ?? [];
+            bonsaiLog('Connection verified. Available models:', availableModels.length);
+
+            // Now process Agent.md
+            panel.webview.postMessage({ command: 'loading', text: 'Processing Agent.md...' });
             const { content: generatedCode, reasoning } = await processAgentMdWithLLM(agentMdContent);
             bonsaiLog('Agent.md processed successfully. Generated code length:', generatedCode.length);
-            panel.webview.postMessage({ 
-              command: 'agentMdProcessResult', 
-              success: true, 
+            panel.webview.postMessage({
+              command: 'agentMdProcessResult',
+              success: true,
               code: generatedCode,
-              reasoning 
+              reasoning
             });
           } catch (err: any) {
             bonsaiLog('Agent.md processing failed:', err?.message || err);
-            panel.webview.postMessage({ 
-              command: 'agentMdProcessResult', 
-              success: false, 
-              message: err?.message || 'Processing failed' 
+            panel.webview.postMessage({
+              command: 'agentMdProcessResult',
+              success: false,
+              message: err?.message || 'Processing failed'
             });
           }
           return;
