@@ -77,8 +77,8 @@ agentMdInput.addEventListener('change', function () {
     if (!file) { return; }
     const reader = new FileReader();
     reader.onload = function (ev) {
-        const codeEl = document.getElementById('code');
-        if (codeEl) { codeEl.value = ev.target.result; }
+        const agentMdEl = document.getElementById('agentMdContent');
+        if (agentMdEl) { agentMdEl.value = ev.target.result; }
         const nameEl = document.getElementById('agentMdFilename');
         if (nameEl) { nameEl.textContent = file.name; }
     };
@@ -88,6 +88,32 @@ agentMdInput.addEventListener('change', function () {
 
 document.getElementById('btnLoadAgentMd').addEventListener('click', function () {
     agentMdInput.click();
+});
+
+// Process Agent.md button handler
+document.getElementById('btnProcessAgentMd').addEventListener('click', function () {
+    var agentMdContent = document.getElementById('agentMdContent').value || '';
+    if (!agentMdContent.trim()) {
+        var statusEl = document.getElementById('agentMdProcessStatus');
+        if (statusEl) {
+            statusEl.textContent = 'Please enter or load Agent.md content first.';
+            statusEl.className = 'error';
+        }
+        return;
+    }
+    var statusEl = document.getElementById('agentMdProcessStatus');
+    if (statusEl) {
+        statusEl.textContent = 'Processing...';
+        statusEl.className = 'processing';
+    }
+    var baseUrl = document.getElementById('baseUrlInput').value || '';
+    var model = document.getElementById('modelInput').value || '';
+    vscode.postMessage({ 
+        command: 'processAgentMd', 
+        content: agentMdContent,
+        baseUrl: baseUrl,
+        model: model
+    });
 });
 
 /** Send a command object to the backend */
@@ -305,6 +331,24 @@ window.addEventListener('message', function (event) {
         if (statusEl) {
             statusEl.textContent = message.message;
             statusEl.className = message.success ? 'connection-success' : 'connection-error';
+        }
+    }
+
+    if (message.command === 'agentMdProcessResult') {
+        var statusEl = document.getElementById('agentMdProcessStatus');
+        if (message.success) {
+            // Put the generated code into the code textarea
+            var codeEl = document.getElementById('code');
+            if (codeEl && message.code) { codeEl.value = message.code; }
+            if (statusEl) {
+                statusEl.textContent = '✓ Code generated successfully!';
+                statusEl.className = 'success';
+            }
+        } else {
+            if (statusEl) {
+                statusEl.textContent = '✗ ' + (message.message || 'Processing failed');
+                statusEl.className = 'error';
+            }
         }
     }
 

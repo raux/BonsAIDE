@@ -151,3 +151,28 @@ textarea {
 #connectionTestStatus.connection-testing { color: #856404; background: #fff3cd; }
 #connectionTestStatus.connection-success { color: #155724; background: #d4edda; }
 #connectionTestStatus.connection-error   { color: #721c24; background: #f8d7da; }
+
+/* ---- Agent.md process button and status ------------------- */
+.btn-process-agent {
+    appearance: none;
+    border: 0;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: #fff;
+    background: #5a67d8;
+    cursor: pointer;
+    transition: transform .05s ease, filter .15s ease, opacity .15s ease;
+}
+.btn-process-agent:hover { transform: translateY(-1px); background: #4c51bf; }
+.btn-process-agent:active { transform: translateY(0); }
+.btn-process-agent:disabled { cursor: not-allowed; filter: grayscale(35%) opacity(.8); }
+
+#agentMdProcessStatus {
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+#agentMdProcessStatus.processing { color: #856404; background: #fff3cd; }
+#agentMdProcessStatus.success { color: #155724; background: #d4edda; }
+#agentMdProcessStatus.error { color: #721c24; background: #f8d7da; }
