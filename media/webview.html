@@ -382,15 +382,14 @@
         // Process Agent.md button handler
         document.getElementById('btnProcessAgentMd').addEventListener('click', function () {
             const agentMdContent = document.getElementById('agentMdContent').value || '';
+            const statusEl = document.getElementById('agentMdProcessStatus');
             if (!agentMdContent.trim()) {
-                const statusEl = document.getElementById('agentMdProcessStatus');
                 if (statusEl) {
                     statusEl.textContent = 'Please enter or load Agent.md content first.';
                     statusEl.className = 'error';
                 }
                 return;
             }
-            const statusEl = document.getElementById('agentMdProcessStatus');
             if (statusEl) {
                 statusEl.textContent = 'Processing...';
                 statusEl.className = 'processing';

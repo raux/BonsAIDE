@@ -93,15 +93,14 @@ document.getElementById('btnLoadAgentMd').addEventListener('click', function () 
 // Process Agent.md button handler
 document.getElementById('btnProcessAgentMd').addEventListener('click', function () {
     var agentMdContent = document.getElementById('agentMdContent').value || '';
+    var statusEl = document.getElementById('agentMdProcessStatus');
     if (!agentMdContent.trim()) {
-        var statusEl = document.getElementById('agentMdProcessStatus');
         if (statusEl) {
             statusEl.textContent = 'Please enter or load Agent.md content first.';
             statusEl.className = 'error';
         }
         return;
     }
-    var statusEl = document.getElementById('agentMdProcessStatus');
     if (statusEl) {
         statusEl.textContent = 'Processing...';
         statusEl.className = 'processing';
