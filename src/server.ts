@@ -266,6 +266,97 @@ Validate your output against the RULES before responding.
 }
 
 // ---------------------------------------------------------------------------
+// LLM – processAgentMdWithLLM (processes Agent.md content to generate code)
+// ---------------------------------------------------------------------------
+
+async function processAgentMdWithLLM(
+  agentMdContent: string
+): Promise<{ content: string; reasoning: string }> {
+  const systemPrompt = `
+You are an expert code generation assistant. You will be given an Agent.md file that describes a task or specification.
+Your job is to analyze the Agent.md content and generate the appropriate source code that implements the described task.
+
+You MUST return output using ONLY the two XML tags below, with nothing before or after them. Absolutely NO markdown, NO backticks, NO prose outside the tags.
+
+### REQUIRED SCHEMA (use exactly these tags and order):
+<code>
+[ONLY the final generated source code here — no comments explaining the code, no prose]
+</code>
+<reasoning>
+[ONLY the explanation of what the code does and how it implements the Agent.md specification — plain text, no code fences]
+</reasoning>
+
+### RULES (strict):
+1) Output MUST start with "<code>" on the first line and end with "</reasoning>" on the last line.
+2) No additional tags, headers, or text outside the two blocks.
+3) Put ALL generated source code inside <code>. Do NOT include explanations or markdown there.
+4) Put ALL explanation inside <reasoning>. Do NOT include code fences there.
+5) Do NOT wrap anything in triple backticks.
+6) Generate complete, working code that implements the specification from the Agent.md file.
+
+Validate your output against the RULES before responding.
+  `.trim();
+
+  const BASE_URL = baseUrl || 'localhost:1234/v1';
+  const MODEL = LLMmodel || 'qwen/qwen2.5-coder-3b-instruct';
+  const API_KEY = 'lm-studio';
+
+  async function requestLLM(): Promise<{ response: string; usage?: any }> {
+    const res = await fetch(`http://${BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Generate source code based on this Agent.md specification:\n\n${agentMdContent}` },
+        ],
+        temperature: 0.7,
+        stream: false,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
+    }
+
+    const json: any = await res.json();
+    const output: string =
+      json?.choices?.[0]?.message?.content?.trim?.() ??
+      json?.choices?.[0]?.text?.trim?.() ?? '';
+    return { response: output, usage: json?.usage };
+  }
+
+  // Try up to 3 times to get a valid response
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const data = await requestLLM();
+      const output = data.response;
+      const codeMatch = output.match(/<code>([\s\S]*?)<\/code>/i);
+      const reasoningMatch = output.match(/<reasoning>([\s\S]*?)<\/reasoning>/i);
+      const content = codeMatch?.[1]?.trim() ?? '';
+      const reasoning = reasoningMatch?.[1]?.trim() ?? '(no reasoning provided)';
+
+      if (content) {
+        return { content, reasoning };
+      } else {
+        console.warn('No <code> block found in LLM response. Retrying...');
+      }
+    } catch (err) {
+      console.warn('Error during Agent.md processing:', (err as Error).message);
+      if (attempt === 2) throw err; // Re-throw on last attempt
+    }
+    await new Promise(res => setTimeout(res, 1000));
+  }
+
+  throw new Error('Failed to generate code from Agent.md after multiple attempts');
+}
+
+// ---------------------------------------------------------------------------
 // Initialise a fresh Bonsai with a root placeholder
 // ---------------------------------------------------------------------------
 
@@ -537,6 +628,59 @@ async function handleMessage(message: any): Promise<void> {
     } catch (err: any) {
       bonsaiLog('Connection test failed:', err?.message || err);
       broadcast({ command: 'connectionTestResult', success: false, message: `✗ Connection failed: ${err?.message || err}` });
+    }
+    return;
+  }
+
+  if (message.command === 'processAgentMd') {
+    const agentMdContent = message.content || '';
+    baseUrl = message.baseUrl || baseUrl;
+    LLMmodel = message.model || LLMmodel;
+
+    bonsaiLog('Processing Agent.md content, length:', agentMdContent.length);
+    broadcast({ command: 'loading', text: 'Verifying LLM connection...' });
+
+    try {
+      // First, verify LLM connection before processing
+      bonsaiLog('Verifying LLM connection before processing Agent.md');
+      if (!/^[\w.-]+(:\d+)?(\/[\w./]*)?$/.test(baseUrl)) {
+        throw new Error('Invalid URL format. Expected format: host:port/path (e.g., localhost:1234/v1)');
+      }
+
+      const modelsRes = await fetch(`http://${baseUrl}/models`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer lm-studio'
+        },
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (!modelsRes.ok) {
+        throw new Error(`LLM server returned ${modelsRes.status}: ${modelsRes.statusText}`);
+      }
+
+      const modelsData: any = await modelsRes.json();
+      const availableModels = modelsData?.data?.map((m: any) => m.id) ?? [];
+      bonsaiLog('Connection verified. Available models:', availableModels.length);
+
+      // Now process Agent.md
+      broadcast({ command: 'loading', text: 'Processing Agent.md...' });
+      const { content: generatedCode, reasoning } = await processAgentMdWithLLM(agentMdContent);
+      bonsaiLog('Agent.md processed successfully. Generated code length:', generatedCode.length);
+      broadcast({
+        command: 'agentMdProcessResult',
+        success: true,
+        code: generatedCode,
+        reasoning
+      });
+    } catch (err: any) {
+      bonsaiLog('Agent.md processing failed:', err?.message || err);
+      broadcast({
+        command: 'agentMdProcessResult',
+        success: false,
+        message: err?.message || 'Processing failed'
+      });
     }
     return;
   }

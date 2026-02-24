@@ -154,6 +154,31 @@
         #connectionTestStatus.connection-testing { color: #856404; background: #fff3cd; }
         #connectionTestStatus.connection-success { color: #155724; background: #d4edda; }
         #connectionTestStatus.connection-error   { color: #721c24; background: #f8d7da; }
+
+        /* Agent.md process button and status */
+        .btn-process-agent {
+            appearance: none;
+            border: 0;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-weight: 600;
+            color: #fff;
+            background: #5a67d8;
+            cursor: pointer;
+            transition: transform .05s ease, filter .15s ease, opacity .15s ease;
+        }
+        .btn-process-agent:hover { transform: translateY(-1px); background: #4c51bf; }
+        .btn-process-agent:active { transform: translateY(0); }
+        .btn-process-agent:disabled { cursor: not-allowed; filter: grayscale(35%) opacity(.8); }
+
+        #agentMdProcessStatus {
+            font-size: 13px;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        #agentMdProcessStatus.processing { color: #856404; background: #fff3cd; }
+        #agentMdProcessStatus.success { color: #155724; background: #d4edda; }
+        #agentMdProcessStatus.error { color: #721c24; background: #f8d7da; }
     </style>
 
 </head>
@@ -177,11 +202,18 @@
     <button id="btnExportJson" title="Export current Bonsai as JSON">Export JSON</button>
     <button id="btnImportJson" title="Import Bonsai from JSON">Import JSON</button>
 
-    <h2>Source code or Agent.md of the node selected</h2>
+    <h2>Agent.md Processing</h2>
     <div style="margin-bottom:4px;">
-        <button id="btnLoadAgentMd" title="Load an agent.md file as the input for code generation">📄 Load Agent.md</button>
+        <button id="btnLoadAgentMd" title="Load an agent.md file for processing">📄 Load Agent.md</button>
         <span id="agentMdFilename" style="margin-left:8px; font-style:italic; color:#666;"></span>
     </div>
+    <textarea style="width: 100%;" id="agentMdContent" rows="8" cols="60" placeholder="Paste or load your Agent.md content here. This will be processed by the LLM to generate source code."></textarea>
+    <div style="margin-top:6px; margin-bottom:12px;">
+        <button id="btnProcessAgentMd" class="btn-process-agent" title="Process the Agent.md content with the LLM to generate source code">⚡ Process Agent.md</button>
+        <span id="agentMdProcessStatus" style="margin-left:8px;"></span>
+    </div>
+
+    <h2>Source code of the node selected</h2>
     <textarea style="width: 100%;" id="code" rows="10"
         cols="60">def hello():\n    print(\"Hello, world!\")</textarea><br>
     <!-- Collapsible Reasoning Panel -->
@@ -334,8 +366,8 @@
                 if (!file) { return; }
                 const reader = new FileReader();
                 reader.onload = function (ev) {
-                    const codeEl = document.getElementById('code');
-                    if (codeEl) { codeEl.value = ev.target.result; }
+                    const agentMdEl = document.getElementById('agentMdContent');
+                    if (agentMdEl) { agentMdEl.value = ev.target.result; }
                     const nameEl = document.getElementById('agentMdFilename');
                     if (nameEl) { nameEl.textContent = file.name; }
                 };
@@ -346,6 +378,31 @@
                 agentMdInputVsc.click();
             });
         })();
+
+        // Process Agent.md button handler
+        document.getElementById('btnProcessAgentMd').addEventListener('click', function () {
+            const agentMdContent = document.getElementById('agentMdContent').value || '';
+            const statusEl = document.getElementById('agentMdProcessStatus');
+            if (!agentMdContent.trim()) {
+                if (statusEl) {
+                    statusEl.textContent = 'Please enter or load Agent.md content first.';
+                    statusEl.className = 'error';
+                }
+                return;
+            }
+            if (statusEl) {
+                statusEl.textContent = 'Processing...';
+                statusEl.className = 'processing';
+            }
+            const baseUrl = document.getElementById('baseUrlInput').value || '';
+            const model = document.getElementById('modelInput').value || '';
+            vscode.postMessage({ 
+                command: 'processAgentMd', 
+                content: agentMdContent,
+                baseUrl,
+                model
+            });
+        });
 
         document.getElementById('btnExportJson').addEventListener('click', () => {
             vscode.postMessage({ command: 'exportJSON' });
@@ -503,6 +560,24 @@
                 if (statusEl) {
                     statusEl.textContent = message.message;
                     statusEl.className = message.success ? 'connection-success' : 'connection-error';
+                }
+            }
+
+            if (message.command === 'agentMdProcessResult') {
+                const statusEl = document.getElementById('agentMdProcessStatus');
+                if (message.success) {
+                    // Put the generated code into the code textarea
+                    const codeEl = document.getElementById('code');
+                    if (codeEl && message.code) { codeEl.value = message.code; }
+                    if (statusEl) {
+                        statusEl.textContent = '✓ Code generated successfully!';
+                        statusEl.className = 'success';
+                    }
+                } else {
+                    if (statusEl) {
+                        statusEl.textContent = '✗ ' + (message.message || 'Processing failed');
+                        statusEl.className = 'error';
+                    }
                 }
             }
 
