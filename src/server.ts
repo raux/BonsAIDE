@@ -63,7 +63,7 @@ let activeBranchId: string | null = null;
 let currentId = 0;
 let selectedNodeId: number | null = null;
 let baseUrl: string = process.env.BONSAI_LM_URL ?? 'localhost:1234/v1';
-let LLMmodel: string = process.env.BONSAI_LM_MODEL ?? 'qwen/qwen2.5-coder-3b-instruct';
+let LLMmodel: string = process.env.BONSAI_LM_MODEL ?? 'deepseek/deepseek-r1-0528-qwen3-8b';
 let bonsaiLogs: string[] = [];
 
 // ---------------------------------------------------------------------------
@@ -206,7 +206,7 @@ Validate your output against the RULES before responding.
 
   const fullPrompt = `${prompt}\n${code}`;
   const BASE_URL = baseUrl || 'localhost:1234/v1';
-  const MODEL = LLMmodel || 'qwen/qwen2.5-coder-3b-instruct';
+  const MODEL = LLMmodel || 'deepseek/deepseek-r1-0528-qwen3-8b';
   const API_KEY = 'lm-studio';
 
   async function requestLLM(): Promise<{ response: string; usage?: any }> {
@@ -298,7 +298,7 @@ Validate your output against the RULES before responding.
   `.trim();
 
   const BASE_URL = baseUrl || 'localhost:1234/v1';
-  const MODEL = LLMmodel || 'qwen/qwen2.5-coder-3b-instruct';
+  const MODEL = LLMmodel || 'deepseek/deepseek-r1-0528-qwen3-8b';
   const API_KEY = 'lm-studio';
 
   async function requestLLM(): Promise<{ response: string; usage?: any }> {
