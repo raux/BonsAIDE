@@ -57,7 +57,7 @@ BonsAIDE connects to a local [LM Studio](https://lmstudio.ai/) server.
 | Environment variable | Default | Description |
 |---|---|---|
 | `BONSAI_LM_URL` | `localhost:1234/v1` | Base URL for the OpenAI-compatible LM Studio endpoint |
-| `BONSAI_LM_MODEL` | `qwen/qwen2.5-coder-3b-instruct` | Model identifier sent in every chat-completion request |
+| `BONSAI_LM_MODEL` | `deepseek/deepseek-r1-0528-qwen3-8b` | Model identifier sent in every chat-completion request |
 
 Both values can also be set interactively inside the Bonsai UI.
 

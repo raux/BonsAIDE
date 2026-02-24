@@ -236,7 +236,7 @@ export function activate(context: vscode.ExtensionContext) {
         activeBranchId = persisted.activeBranchId ?? persisted.branches[0].id ?? 'main';
         currentId = typeof persisted.currentId === 'number' ? persisted.currentId : 0;
         baseUrl = typeof persisted.baseUrl === 'string' ? persisted.baseUrl : 'localhost:1234/v1';
-        LLMmodel = typeof persisted.LLMmodel === 'string' ? persisted.LLMmodel : 'qwen/qwen2.5-coder-3b-instruct';
+        LLMmodel = typeof persisted.LLMmodel === 'string' ? persisted.LLMmodel : 'deepseek/deepseek-r1-0528-qwen3-8b';
 
         // Safety: recompute leaf flags in case the saved file is older or was edited
         const active = branches.find(b => b.id === activeBranchId) ?? branches[0];
@@ -958,7 +958,7 @@ Validate your output against the RULES before responding.
 
   const fullPrompt = `${prompt}\n${code}`;
   const BASE_URL = baseUrl || "http://10.184.201.141:1234/v1";
-  const MODEL = LLMmodel || "qwen/qwen2.5-coder-3b-instruct"; //"qwen/qwen2.5-coder-3b-instruct"; //qwen/qwen2.5-coder-14b"; //qwen2.5-0.5b-instruct-mlx"; //"gpt-oss-20b";
+  const MODEL = LLMmodel || "deepseek/deepseek-r1-0528-qwen3-8b"; //"qwen/qwen2.5-coder-3b-instruct"; //qwen/qwen2.5-coder-14b"; //qwen2.5-0.5b-instruct-mlx"; //"gpt-oss-20b";
   const API_KEY = "lm-studio";
 
   async function requestLLM(): Promise<{ response: string; usage?: any } | { error: string }> {
@@ -1068,7 +1068,7 @@ Validate your output against the RULES before responding.
   `.trim();
 
   const BASE_URL = baseUrl || "localhost:1234/v1";
-  const MODEL = LLMmodel || "qwen/qwen2.5-coder-3b-instruct";
+  const MODEL = LLMmodel || "deepseek/deepseek-r1-0528-qwen3-8b";
   const API_KEY = "lm-studio";
 
   async function requestLLM(): Promise<{ response: string; usage?: any }> {

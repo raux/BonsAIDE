@@ -51,8 +51,8 @@ Set your LM Studio URL before launching:
 
 Set your LM Studio model before launching:
 
-* macOS/Linux: `export BONSAI_LM_MODEL=qwen/qwen2.5-coder-3b-instruct`
-* Windows (PowerShell): `$env:BONSAI_LM_MODEL="qwen/qwen2.5-coder-3b-instruct"`
+* macOS/Linux: `export BONSAI_LM_MODEL=deepseek/deepseek-r1-0528-qwen3-8b`
+* Windows (PowerShell): `$env:BONSAI_LM_MODEL="deepseek/deepseek-r1-0528-qwen3-8b"`
 
 Both values can also be configured interactively in the Bonsai UI.
 
