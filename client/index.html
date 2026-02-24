@@ -33,8 +33,12 @@
     <button id="btnExportJson" title="Export current Bonsai as JSON">Export JSON</button>
     <button id="btnImportJson" title="Import Bonsai from JSON">Import JSON</button>
 
-    <h2>Source code of the node selected</h2>
-    <textarea style="width:100%;" id="code" rows="10" cols="60"># Paste or type your code here, then select this node and run an activity.</textarea>
+    <h2>Source code or Agent.md of the node selected</h2>
+    <div style="margin-bottom:4px;">
+        <button id="btnLoadAgentMd" title="Load an agent.md file as the input for code generation">📄 Load Agent.md</button>
+        <span id="agentMdFilename" style="margin-left:8px; font-style:italic; color:#666;"></span>
+    </div>
+    <textarea style="width:100%;" id="code" rows="10" cols="60"># Paste or type your code here, or load an agent.md file above, then select this node and run an activity.</textarea>
 
     <!-- Collapsible reasoning panel -->
     <details id="reasoningPanel" style="margin-top:8px; display:none;">

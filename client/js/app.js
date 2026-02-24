@@ -65,6 +65,31 @@ fileInput.addEventListener('change', function () {
     fileInput.value = ''; // reset so same file can be re-imported
 });
 
+// Hidden file input for Agent.md upload
+const agentMdInput = document.createElement('input');
+agentMdInput.type = 'file';
+agentMdInput.accept = '.md,.markdown';
+agentMdInput.style.display = 'none';
+document.body.appendChild(agentMdInput);
+
+agentMdInput.addEventListener('change', function () {
+    const file = agentMdInput.files && agentMdInput.files[0];
+    if (!file) { return; }
+    const reader = new FileReader();
+    reader.onload = function (ev) {
+        const codeEl = document.getElementById('code');
+        if (codeEl) { codeEl.value = ev.target.result; }
+        const nameEl = document.getElementById('agentMdFilename');
+        if (nameEl) { nameEl.textContent = file.name; }
+    };
+    reader.readAsText(file);
+    agentMdInput.value = ''; // reset so same file can be re-loaded
+});
+
+document.getElementById('btnLoadAgentMd').addEventListener('click', function () {
+    agentMdInput.click();
+});
+
 /** Send a command object to the backend */
 function sendToServer(msg) {
     fetch('/message', {
