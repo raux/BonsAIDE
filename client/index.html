@@ -16,11 +16,10 @@
 
     <!-- Activity legend -->
     <div class="legend">
-        <span class="pill"><span class="swatch fix_with_context"></span>Fix with description</span>
-        <span class="pill"><span class="swatch fix_without_context"></span>Fix w/o description</span>
         <span class="pill"><span class="swatch gen_tests"></span>Generate tests</span>
         <span class="pill"><span class="swatch refactor"></span>Refactor</span>
         <span class="pill"><span class="swatch exceptions"></span>Handle exceptions</span>
+        <span class="pill"><span class="swatch agent_md_alternative"></span>Agent.md alternative</span>
         <span class="pill"><span class="swatch other"></span>Other</span>
         <span class="pill">
             <span class="swatch gradient"></span>Border: Code Similarity (Less → More)
@@ -57,29 +56,15 @@
 
     <!-- Activities -->
     <h2>Activities</h2>
-    <div id="problemDescDiv" style="margin:8px 0;">
-        <label style="display:block; font-weight:600;">
-            Problem description (for the "with context" activity):
-        </label>
-        <textarea id="problemDesc" rows="4" cols="60"
-            placeholder="Describe the bug / failure scenario / expected behavior…"></textarea>
-    </div>
 
     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
-        <span style="font-weight:600;">Initial (run one of these first):</span>
-        <button id="btnFixWith" class="btn-activity" data-activity="fix_with_context"
-            title="Fix the problem using the provided problem description">Fix with problem description</button>
-        <button id="btnFixNoCtx" class="btn-activity" data-activity="fix_without_context"
-            title="Fix the problem without a provided description; infer it from code/tests">Fix without description</button>
-    </div>
-
-    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <span style="font-weight:600;">Then:</span>
-        <button id="btnGenTests" class="btn-activity" data-activity="gen_tests" disabled
+        <button id="btnGenerateAlternatives" class="btn-activity" data-activity="agent_md_alternative"
+            title="Generate multiple alternatives based on Agent.md content">⚡ Generate Alternatives from Agent.md</button>
+        <button id="btnGenTests" class="btn-activity" data-activity="gen_tests"
             title="Generate unit tests">Generate tests</button>
-        <button id="btnRefactor" class="btn-activity" data-activity="refactor" disabled
+        <button id="btnRefactor" class="btn-activity" data-activity="refactor"
             title="Refactor the code (no behavior change)">Refactor</button>
-        <button id="btnExceptions" class="btn-activity" data-activity="exceptions" disabled
+        <button id="btnExceptions" class="btn-activity" data-activity="exceptions"
             title="Harden exception handling">Handle exceptions</button>
     </div>
 

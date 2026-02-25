@@ -4,11 +4,10 @@
 
 /* Activity palette (must match getActivityColor() in server.ts) */
 :root {
-    --color-fix-with:      #834632;
-    --color-fix-nocontext: #83675e;
     --color-tests:         #970071;
     --color-refactor:      #006d18;
     --color-exceptions:    #00b0b6;
+    --color-agent-md:      #4c51bf;
     --color-other:         #777777;
 }
 
@@ -79,11 +78,10 @@ textarea {
     filter: grayscale(35%) opacity(.8);
 }
 
-.btn-activity[data-activity="fix_with_context"]    { --btn-color: var(--color-fix-with); }
-.btn-activity[data-activity="fix_without_context"] { --btn-color: var(--color-fix-nocontext); }
 .btn-activity[data-activity="gen_tests"]           { --btn-color: var(--color-tests); }
 .btn-activity[data-activity="refactor"]            { --btn-color: var(--color-refactor); }
 .btn-activity[data-activity="exceptions"]          { --btn-color: var(--color-exceptions); }
+.btn-activity[data-activity="agent_md_alternative"] { --btn-color: var(--color-agent-md); }
 
 /* ---- Legend ----------------------------------------------- */
 .legend {
@@ -118,11 +116,10 @@ textarea {
     border: 1px solid #ccc;
 }
 
-.swatch.fix_with_context    { background: var(--color-fix-with); }
-.swatch.fix_without_context { background: var(--color-fix-nocontext); }
 .swatch.gen_tests           { background: var(--color-tests); }
 .swatch.refactor            { background: var(--color-refactor); }
 .swatch.exceptions          { background: var(--color-exceptions); }
+.swatch.agent_md_alternative { background: var(--color-agent-md); }
 .swatch.other               { background: var(--color-other); }
 
 /* ---- Connection status badge ------------------------------ */

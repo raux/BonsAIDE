@@ -26,17 +26,14 @@
 
         /* Activity palette (match extension.ts getActivityColor) */
         :root {
-            --color-fix-with: #834632;
-            /* deep green-teal */
-            --color-fix-nocontext: #83675e;
-            /* lighter green-teal, same family */
-
             --color-tests: #970071;
             /* indigo */
             --color-refactor: #006d18;
             /* golden yellow */
             --color-exceptions: #00b0b6;
             /* warm orange */
+            --color-agent-md: #4c51bf;
+            /* purple-blue for agent.md alternatives */
             --color-other: #777777;
             /* neutral dark gray */
         }
@@ -67,14 +64,6 @@
         }
 
         /* Map data-activity -> button color */
-        .btn-activity[data-activity="fix_with_context"] {
-            --btn-color: var(--color-fix-with);
-        }
-
-        .btn-activity[data-activity="fix_without_context"] {
-            --btn-color: var(--color-fix-nocontext);
-        }
-
         .btn-activity[data-activity="gen_tests"] {
             --btn-color: var(--color-tests);
         }
@@ -85,6 +74,10 @@
 
         .btn-activity[data-activity="exceptions"] {
             --btn-color: var(--color-exceptions);
+        }
+
+        .btn-activity[data-activity="agent_md_alternative"] {
+            --btn-color: var(--color-agent-md);
         }
 
         /* Legend pills */
@@ -120,14 +113,6 @@
             border: 1px solid #ccc;
         }
 
-        .swatch.fix_with_context {
-            background: var(--color-fix-with);
-        }
-
-        .swatch.fix_without_context {
-            background: var(--color-fix-nocontext);
-        }
-
         .swatch.gen_tests {
             background: var(--color-tests);
         }
@@ -138,6 +123,10 @@
 
         .swatch.exceptions {
             background: var(--color-exceptions);
+        }
+
+        .swatch.agent_md_alternative {
+            background: var(--color-agent-md);
         }
 
         .swatch.other {
@@ -187,11 +176,10 @@
     <h2>Bonsai</h2>
     <!-- Legend (matches node colors) -->
     <div class="legend">
-        <span class="pill"><span class="swatch fix_with_context"></span>Fix with description</span>
-        <span class="pill"><span class="swatch fix_without_context"></span>Fix w/o description</span>
         <span class="pill"><span class="swatch gen_tests"></span>Generate tests</span>
         <span class="pill"><span class="swatch refactor"></span>Refactor</span>
         <span class="pill"><span class="swatch exceptions"></span>Handle exceptions</span>
+        <span class="pill"><span class="swatch agent_md_alternative"></span>Agent.md alternative</span>
         <span class="pill"><span class="swatch other"></span>Other</span>
         <span class="pill">
             <span class="swatch gradient"></span>Border: Code Similarity (Less → More)
@@ -224,28 +212,15 @@
     <hr>
     <!-- Activities Panel -->
     <h2>Activities</h2>
-    <div id="problemDescDiv" style="margin: 8px 0;">
-        <label style="display:block; font-weight:600;">Problem description (for the “with context” activity):</label>
-        <textarea id="problemDesc" rows="4" cols="60"
-            placeholder="Describe the bug / failure scenario / expected behavior..."></textarea>
-    </div>
 
     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
-        <span style="font-weight:600;">Initial (run one of these first):</span>
-        <button id="btnFixWith" class="btn-activity" data-activity="fix_with_context"
-            title="Fix the problem using the provided problem description">Fix with problem description</button>
-        <button id="btnFixNoCtx" class="btn-activity" data-activity="fix_without_context"
-            title="Fix the problem without a provided description; infer it from code/tests">Fix without
-            description</button>
-    </div>
-
-    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <span style="font-weight:600;">Then:</span>
-        <button id="btnGenTests" class="btn-activity" data-activity="gen_tests" disabled
+        <button id="btnGenerateAlternatives" class="btn-activity" data-activity="agent_md_alternative"
+            title="Generate multiple alternatives based on Agent.md content">⚡ Generate Alternatives from Agent.md</button>
+        <button id="btnGenTests" class="btn-activity" data-activity="gen_tests"
             title="Generate unit tests">Generate tests</button>
-        <button id="btnRefactor" class="btn-activity" data-activity="refactor" disabled
+        <button id="btnRefactor" class="btn-activity" data-activity="refactor"
             title="Refactor the code (no behavior change)">Refactor</button>
-        <button id="btnExceptions" class="btn-activity" data-activity="exceptions" disabled
+        <button id="btnExceptions" class="btn-activity" data-activity="exceptions"
             title="Harden exception handling">Handle exceptions</button>
     </div>
 
@@ -830,24 +805,6 @@
     <script>
         // --- Activity templates (only CODE context is sent by the extension; we only build the prompt) ---
         const ACTIVITY_TEMPLATES = {
-            fix_with_context: (problem) => `
-            You are an expert software engineer. You will be given CODE (from the user) and a PROBLEM DESCRIPTION (below).
-            Your task is to FIX the code to solve ONLY the described problem, keeping behavior otherwise unchanged.
-            - Keep the public API stable unless strictly needed.
-            - Prefer minimal, targeted changes with clear rationale.
-            - If tests exist, preserve them; if not, keep code testable.
-
-            PROBLEM DESCRIPTION:
-            ${problem}`.trim(),
-
-            fix_without_context: () => `
-            You are an expert software engineer. You will be given CODE (from the user).
-            First, infer the most likely primary defect or weakness, then FIX it with minimal, targeted changes.
-            - Keep behavior otherwise unchanged.
-            - Keep the public API stable unless strictly needed.
-            - Make the code testable and maintainable.
-            `.trim(),
-
             gen_tests: () => `
             You are a senior engineer. Your task is to APPEND unit tests to the provided source code, WITHOUT modifying the source. STRICTLY follow these rules:
             - INCLUDE in the answer the original source code in the prompt. Do NOT change, reorder, format, or delete any line of the original source.
@@ -867,39 +824,37 @@
             - Avoid blanket catches; keep failures observable.
             - Do not change external behavior except to handle errors gracefully.
             `.trim(),
+
+            agent_md_alternative: (agentMdContent) => `
+            You are an expert software engineer. You will be given CODE (from the user) and an Agent.md specification (below).
+            Your task is to generate an ALTERNATIVE implementation based on the Agent.md specification.
+            - Generate complete, working code that implements the specification.
+            - Consider different approaches, design patterns, or optimization strategies.
+            - Maintain clarity and follow best practices.
+
+            AGENT.MD SPECIFICATION:
+            ${agentMdContent}`.trim(),
         };
 
-        // --- Flow state: enforce that one of the initial activities runs first ---
-        let initialActivityDone = false;
-
+        // --- Flow state: all activities are now always enabled ---
         function setFollowupEnabled(enabled) {
-            document.getElementById('btnGenTests').disabled = !enabled;
-            document.getElementById('btnRefactor').disabled = !enabled;
-            document.getElementById('btnExceptions').disabled = !enabled;
+            // No-op: all activities are always enabled now
         }
 
         function setInitialFixEnabled(enabled) {
-            document.getElementById('btnFixWith').disabled = !enabled;
-            document.getElementById('btnFixNoCtx').disabled = !enabled;
-            document.getElementById('problemDescDiv').style.display = enabled ? 'block' : 'none';
+            // No-op: fix buttons removed
         }
 
         function resetFlow() {
-            initialActivityDone = false;
-            setInitialFixEnabled(true);
-            setFollowupEnabled(false);
+            // No-op: all activities are always enabled now
         }
 
         window.addEventListener('message', (event) => {
             const message = event.data;
             if (message.command === 'setActivityFlow') {
-                initialActivityDone = message.initialDone;
-                setInitialFixEnabled(!initialActivityDone);
-                setFollowupEnabled(initialActivityDone);
+                // No-op: flow management removed
             }
         });
-
-        // document.getElementById('btnResetFlow').addEventListener('click', resetFlow);
 
         // Helpers: pull UI state
         function getBaseCode() {
@@ -913,32 +868,23 @@
         // Generic runner
         function runActivity(activityKey) {
             let prompt = '';
-            if (activityKey === 'fix_with_context') {
-                const problem = (document.getElementById('problemDesc').value || '').trim();
-                if (!problem) {
-                    console.log('Please provide a problem description for "Fix with problem description".');
-                    return;
-                }
-                prompt = ACTIVITY_TEMPLATES.fix_with_context(problem);
-            } else if (activityKey === 'fix_without_context') {
-                prompt = ACTIVITY_TEMPLATES.fix_without_context();
-            } else if (activityKey === 'gen_tests') {
-                if (!initialActivityDone) { console.log('Run one initial activity first.'); return; }
+            if (activityKey === 'gen_tests') {
                 prompt = ACTIVITY_TEMPLATES.gen_tests();
             } else if (activityKey === 'refactor') {
-                if (!initialActivityDone) { console.log('Run one initial activity first.'); return; }
                 prompt = ACTIVITY_TEMPLATES.refactor();
             } else if (activityKey === 'exceptions') {
-                if (!initialActivityDone) { console.log('Run one initial activity first.'); return; }
                 prompt = ACTIVITY_TEMPLATES.exceptions();
+            } else if (activityKey === 'agent_md_alternative') {
+                const agentMdContent = (document.getElementById('agentMdContent').value || '').trim();
+                if (!agentMdContent) {
+                    console.log('Please provide Agent.md content first.');
+                    return;
+                }
+                prompt = ACTIVITY_TEMPLATES.agent_md_alternative(agentMdContent);
             } else {
                 console.warn('Unknown activity:', activityKey);
                 return;
             }
-
-            // Block all activities until new code is received and the user selects a node
-            setInitialFixEnabled(false);
-            setFollowupEnabled(false);
 
             // Post to VS Code extension (reuse your generate message)
             const baseUrl = document.getElementById('baseUrlInput').value || '';
@@ -959,13 +905,12 @@
         }
 
         // Wire buttons
-        document.getElementById('btnFixWith').addEventListener('click', () => runActivity('fix_with_context'));
-        document.getElementById('btnFixNoCtx').addEventListener('click', () => runActivity('fix_without_context'));
+        document.getElementById('btnGenerateAlternatives').addEventListener('click', () => runActivity('agent_md_alternative'));
         document.getElementById('btnGenTests').addEventListener('click', () => runActivity('gen_tests'));
         document.getElementById('btnRefactor').addEventListener('click', () => runActivity('refactor'));
         document.getElementById('btnExceptions').addEventListener('click', () => runActivity('exceptions'));
 
-        // Initialize
+        // Initialize (no-op now)
         resetFlow();
     </script>
 

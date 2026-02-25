@@ -98,11 +98,10 @@ function broadcast(message: object): void {
 
 function getActivityColor(activity?: string): string {
   switch (activity) {
-    case 'fix_with_context':    return '#834632';
-    case 'fix_without_context': return '#83675e';
     case 'gen_tests':           return '#970071';
     case 'refactor':            return '#006d18';
     case 'exceptions':          return '#00b0b6';
+    case 'agent_md_alternative': return '#4c51bf';
     default:                    return '#777777';
   }
 }

@@ -524,25 +524,6 @@ function cleanupAllTooltips() {
    ============================================================= */
 
 const ACTIVITY_TEMPLATES = {
-    fix_with_context: function (problem) {
-        return (
-            'You are an expert software engineer. You will be given CODE (from the user) and a PROBLEM DESCRIPTION (below).\n' +
-            'Your task is to FIX the code to solve ONLY the described problem, keeping behavior otherwise unchanged.\n' +
-            '- Keep the public API stable unless strictly needed.\n' +
-            '- Prefer minimal, targeted changes with clear rationale.\n' +
-            '- If tests exist, preserve them; if not, keep code testable.\n\n' +
-            'PROBLEM DESCRIPTION:\n' + problem
-        ).trim();
-    },
-    fix_without_context: function () {
-        return (
-            'You are an expert software engineer. You will be given CODE (from the user).\n' +
-            'First, infer the most likely primary defect or weakness, then FIX it with minimal, targeted changes.\n' +
-            '- Keep behavior otherwise unchanged.\n' +
-            '- Keep the public API stable unless strictly needed.\n' +
-            '- Make the code testable and maintainable.'
-        ).trim();
-    },
     gen_tests: function () {
         return (
             'You are a senior engineer. Your task is to APPEND unit tests to the provided source code, WITHOUT modifying the source. STRICTLY follow these rules:\n' +
@@ -565,36 +546,37 @@ const ACTIVITY_TEMPLATES = {
             '- Avoid blanket catches; keep failures observable.\n' +
             '- Do not change external behavior except to handle errors gracefully.'
         ).trim();
+    },
+    agent_md_alternative: function (agentMdContent) {
+        return (
+            'You are an expert software engineer. You will be given CODE (from the user) and an Agent.md specification (below).\n' +
+            'Your task is to generate an ALTERNATIVE implementation based on the Agent.md specification.\n' +
+            '- Generate complete, working code that implements the specification.\n' +
+            '- Consider different approaches, design patterns, or optimization strategies.\n' +
+            '- Maintain clarity and follow best practices.\n\n' +
+            'AGENT.MD SPECIFICATION:\n' + agentMdContent
+        ).trim();
     }
 };
 
 let initialActivityDone = false;
 
 function setFollowupEnabled(enabled) {
-    document.getElementById('btnGenTests').disabled   = !enabled;
-    document.getElementById('btnRefactor').disabled   = !enabled;
-    document.getElementById('btnExceptions').disabled = !enabled;
+    // No-op: all activities are always enabled now
 }
 
 function setInitialFixEnabled(enabled) {
-    document.getElementById('btnFixWith').disabled    = !enabled;
-    document.getElementById('btnFixNoCtx').disabled   = !enabled;
-    const div = document.getElementById('problemDescDiv');
-    if (div) { div.style.display = enabled ? 'block' : 'none'; }
+    // No-op: fix buttons removed
 }
 
 function resetFlow() {
-    initialActivityDone = false;
-    setInitialFixEnabled(true);
-    setFollowupEnabled(false);
+    // No-op: all activities are always enabled now
 }
 
 window.addEventListener('message', function (event) {
     const message = event.data;
     if (message.command === 'setActivityFlow') {
-        initialActivityDone = message.initialDone;
-        setInitialFixEnabled(!initialActivityDone);
-        setFollowupEnabled(initialActivityDone);
+        // No-op: flow management removed
     }
 });
 
@@ -609,28 +591,20 @@ function getVersionCount() {
 
 function runActivity(activityKey) {
     let prompt = '';
-    if (activityKey === 'fix_with_context') {
-        const problem = (document.getElementById('problemDesc').value || '').trim();
-        if (!problem) { console.log('Please provide a problem description.'); return; }
-        prompt = ACTIVITY_TEMPLATES.fix_with_context(problem);
-    } else if (activityKey === 'fix_without_context') {
-        prompt = ACTIVITY_TEMPLATES.fix_without_context();
-    } else if (activityKey === 'gen_tests') {
-        if (!initialActivityDone) { console.log('Run one initial activity first.'); return; }
+    if (activityKey === 'gen_tests') {
         prompt = ACTIVITY_TEMPLATES.gen_tests();
     } else if (activityKey === 'refactor') {
-        if (!initialActivityDone) { console.log('Run one initial activity first.'); return; }
         prompt = ACTIVITY_TEMPLATES.refactor();
     } else if (activityKey === 'exceptions') {
-        if (!initialActivityDone) { console.log('Run one initial activity first.'); return; }
         prompt = ACTIVITY_TEMPLATES.exceptions();
+    } else if (activityKey === 'agent_md_alternative') {
+        const agentMdContent = (document.getElementById('agentMdContent').value || '').trim();
+        if (!agentMdContent) { console.log('Please provide Agent.md content first.'); return; }
+        prompt = ACTIVITY_TEMPLATES.agent_md_alternative(agentMdContent);
     } else {
         console.warn('Unknown activity:', activityKey);
         return;
     }
-
-    setInitialFixEnabled(false);
-    setFollowupEnabled(false);
 
     const baseUrl = document.getElementById('baseUrlInput').value || '';
     const model   = document.getElementById('modelInput').value   || '';
@@ -649,11 +623,10 @@ function runActivity(activityKey) {
 }
 
 // Wire activity buttons
-document.getElementById('btnFixWith').addEventListener('click',     function () { runActivity('fix_with_context'); });
-document.getElementById('btnFixNoCtx').addEventListener('click',    function () { runActivity('fix_without_context'); });
+document.getElementById('btnGenerateAlternatives').addEventListener('click', function () { runActivity('agent_md_alternative'); });
 document.getElementById('btnGenTests').addEventListener('click',    function () { runActivity('gen_tests'); });
 document.getElementById('btnRefactor').addEventListener('click',    function () { runActivity('refactor'); });
 document.getElementById('btnExceptions').addEventListener('click',  function () { runActivity('exceptions'); });
 
-// Initialise flow state
+// Initialise flow state (no-op now)
 resetFlow();
