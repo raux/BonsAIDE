@@ -9,9 +9,7 @@ Paste your code, then apply activities powered by an **LLM** to generate **multi
 
 **Fill color = last activity**, **leaf borders = similarity** (blue→red vs. the selected leaf), **right-click → Trim** to prune subtrees, and **Export/Import** sessions as JSON.
 
-![Bonsai screenshot](https://github.com/user-attachments/assets/3c7725be-f80a-417f-a78a-5f83b3ff198f)
-
-![Tree visualization](https://github.com/user-attachments/assets/32288510-9012-4b38-9fed-c26f22abfbc8)
+![Bonsai web UI](https://github.com/user-attachments/assets/1c8ed723-114c-4bf3-8352-d143c653707a)
 
 ---
 
@@ -69,9 +67,7 @@ Both values can also be configured interactively in the Bonsai UI.
 7. **Right-click → Trim** to prune a node and its children.
 8. **Export JSON** to save; **Import JSON** to restore.
 
-![Activities](https://github.com/user-attachments/assets/412265da-dd1c-4cf6-90ed-613645199c26)
-![Branches](https://github.com/user-attachments/assets/ee2fb918-07bc-4441-9390-ea9236b8a17a)
-![Code & Reasoning](https://github.com/user-attachments/assets/8a638c52-fe82-46f4-84bc-064df0d85efb)
+![Activities and controls](https://github.com/user-attachments/assets/f1956ca3-7694-45af-b850-792f60ed93ac)
 
 ---
 
