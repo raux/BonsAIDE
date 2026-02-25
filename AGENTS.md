@@ -100,11 +100,10 @@ Activity strings are used as keys for node coloring and LLM prompt routing:
 
 | `activity` value | Meaning |
 |---|---|
-| `fix_with_context` | Fix the problem (with description) |
-| `fix_without_context` | Fix the problem (no description) |
 | `gen_tests` | Generate tests |
 | `refactor` | Refactor |
 | `exceptions` | Handle exceptions |
+| `agent_md_alternative` | Generate alternative based on Agent.md |
 
 ---
 
