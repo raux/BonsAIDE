@@ -1388,7 +1388,7 @@ Validate your output against the RULES before responding.
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const data = await requestLLM();
-      const output = (data as any).response as string;
+      const output = data.response;
       const codeMatch = output.match(/<code>([\s\S]*?)<\/code>/i);
       const reasoningMatch = output.match(/<reasoning>([\s\S]*?)<\/reasoning>/i);
       const content = codeMatch?.[1]?.trim() ?? "";
