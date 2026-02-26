@@ -297,6 +297,49 @@ export function activate(context: vscode.ExtensionContext) {
         await persistState(context);
       }
 
+      // --- Auto-test LLM connection on startup ---
+      void (async () => {
+        try {
+          const testUrl = baseUrl || 'localhost:1234/v1';
+          const testModel = LLMmodel || 'deepseek/deepseek-r1-0528-qwen3-8b';
+          bonsaiLog('Auto-testing LLM connection on startup:', testUrl, 'model:', testModel);
+
+          if (!/^[\w.-]+(:\d+)?(\/[\w./]*)?$/.test(testUrl)) {
+            panel.webview.postMessage({ command: 'connectionTestResult', success: false, message: '✗ Invalid URL format' });
+            return;
+          }
+
+          const modelsRes = await fetch(`http://${testUrl}/models`, {
+            method: 'GET',
+            headers: { 'Authorization': 'Bearer lm-studio' },
+            signal: AbortSignal.timeout(5000)
+          });
+
+          if (!modelsRes.ok) {
+            panel.webview.postMessage({ command: 'connectionTestResult', success: false, message: `✗ LLM server not reachable (HTTP ${modelsRes.status})` });
+            return;
+          }
+
+          const modelsJson: any = await modelsRes.json();
+          const availableModels = modelsJson?.data?.map((m: any) => m.id) ?? [];
+
+          let modelStatus: string;
+          if (availableModels.length === 0) {
+            modelStatus = `Warning: No models reported by server. Make sure "${testModel}" is loaded.`;
+          } else if (availableModels.includes(testModel)) {
+            modelStatus = `Model "${testModel}" is available.`;
+          } else {
+            modelStatus = `Warning: Model "${testModel}" not found. Available: ${availableModels.join(', ')}`;
+          }
+
+          bonsaiLog('Startup connection test successful.', modelStatus);
+          panel.webview.postMessage({ command: 'connectionTestResult', success: true, message: `✓ Connected to LLM server! ${modelStatus}` });
+        } catch (err: any) {
+          bonsaiLog('Startup connection test failed:', err?.message || err);
+          panel.webview.postMessage({ command: 'connectionTestResult', success: false, message: `✗ LLM server not reachable: ${err?.message || err}` });
+        }
+      })();
+
       // Keep bonsai when the user switches tabs
       panel.onDidChangeViewState((e) => {
         if (e.webviewPanel.visible) {

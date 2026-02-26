@@ -14,6 +14,17 @@
         <span id="connectionStatus" class="disconnected">○ Connecting…</span>
     </h2>
 
+    <div style="margin:6px 0; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        <label>LM Studio URL:
+            <input id="baseUrlInput" type="text" size="40" placeholder="localhost:1234/v1">
+        </label>
+        <label>Model:
+            <input id="modelInput" type="text" size="40" placeholder="deepseek/deepseek-r1-0528-qwen3-8b">
+        </label>
+        <button id="btnTestConnection" title="Test connection to LM Studio" aria-label="Test connection to LM Studio">Test Connection</button>
+        <span id="connectionTestStatus" aria-live="polite"></span>
+    </div>
+
     <!-- Activity legend -->
     <div class="legend">
         <span class="pill"><span class="swatch gen_tests"></span>Generate tests</span>
@@ -95,17 +106,6 @@
     <h2>Prompts and outputs</h2>
     <div id="output"></div>
 
-    <hr>
-    <div style="margin:6px 0; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-        <label>LM Studio URL:
-            <input id="baseUrlInput" type="text" size="40" placeholder="localhost:1234/v1">
-        </label>
-        <label>Model:
-            <input id="modelInput" type="text" size="40" placeholder="deepseek/deepseek-r1-0528-qwen3-8b">
-        </label>
-        <button id="btnTestConnection" title="Test connection to LM Studio" aria-label="Test connection to LM Studio">Test Connection</button>
-        <span id="connectionTestStatus" aria-live="polite"></span>
-    </div>
 
     <!-- Cytoscape.js (graph library) -->
     <script src="https://unpkg.com/cytoscape@3.24.0/dist/cytoscape.min.js"></script>
