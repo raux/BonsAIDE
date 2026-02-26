@@ -168,6 +168,15 @@
         #agentMdProcessStatus.processing { color: #856404; background: #fff3cd; }
         #agentMdProcessStatus.success { color: #155724; background: #d4edda; }
         #agentMdProcessStatus.error { color: #721c24; background: #f8d7da; }
+
+        #generateAgentMdStatus {
+            font-size: 13px;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        #generateAgentMdStatus.processing { color: #856404; background: #fff3cd; }
+        #generateAgentMdStatus.success { color: #155724; background: #d4edda; }
+        #generateAgentMdStatus.error { color: #721c24; background: #f8d7da; }
     </style>
 
 </head>
@@ -200,6 +209,16 @@
         <button id="btnProcessAgentMd" class="btn-process-agent" title="Process the Agent.md content with the LLM to generate source code">⚡ Process Agent.md</button>
         <span id="agentMdProcessStatus" style="margin-left:8px;"></span>
     </div>
+
+    <h2>Generate AGENTS.MD from GitHub Repository</h2>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+        <label>GitHub Repository URL:
+            <input id="githubRepoUrl" type="text" size="50" placeholder="https://github.com/owner/repo" />
+        </label>
+        <button id="btnGenerateAgentMd" title="Fetch repository from GitHub and generate AGENTS.MD using LLM">📝 Generate AGENTS.MD</button>
+        <span id="generateAgentMdStatus" style="margin-left:8px;"></span>
+    </div>
+    <textarea style="width:100%; display:none;" id="generatedAgentMd" rows="15" cols="60" readonly placeholder="Generated AGENTS.MD content will appear here..."></textarea>
 
     <h2>Source code of the node selected</h2>
     <textarea style="width: 100%;" id="code" rows="10"
@@ -398,6 +417,31 @@
             vscode.postMessage({ command: 'testConnection', baseUrl, model });
         });
 
+        // Generate AGENTS.MD button handler
+        document.getElementById('btnGenerateAgentMd').addEventListener('click', () => {
+            const repoUrl = document.getElementById('githubRepoUrl').value || '';
+            const statusEl = document.getElementById('generateAgentMdStatus');
+            if (!repoUrl.trim()) {
+                if (statusEl) {
+                    statusEl.textContent = 'Please enter a GitHub repository URL.';
+                    statusEl.className = 'error';
+                }
+                return;
+            }
+            if (statusEl) {
+                statusEl.textContent = 'Generating...';
+                statusEl.className = 'processing';
+            }
+            const baseUrl = document.getElementById('baseUrlInput').value || '';
+            const model = document.getElementById('modelInput').value || '';
+            vscode.postMessage({
+                command: 'generateAgentMd',
+                repoUrl,
+                baseUrl,
+                model
+            });
+        });
+
         function sendPrompt() {
             const prompt = document.getElementById('prompt').value;
             const code = document.getElementById('code').value;
@@ -552,6 +596,26 @@
                     if (statusEl) {
                         statusEl.textContent = '✗ ' + (message.message || 'Processing failed');
                         statusEl.className = 'error';
+                    }
+                }
+            }
+
+            if (message.command === 'generateAgentMdResult') {
+                const genStatusEl = document.getElementById('generateAgentMdStatus');
+                const genTextarea = document.getElementById('generatedAgentMd');
+                if (message.success) {
+                    if (genTextarea && message.content) {
+                        genTextarea.value = message.content;
+                        genTextarea.style.display = 'block';
+                    }
+                    if (genStatusEl) {
+                        genStatusEl.textContent = '✓ AGENTS.MD generated successfully!';
+                        genStatusEl.className = 'success';
+                    }
+                } else {
+                    if (genStatusEl) {
+                        genStatusEl.textContent = '✗ ' + (message.message || 'Generation failed');
+                        genStatusEl.className = 'error';
                     }
                 }
             }

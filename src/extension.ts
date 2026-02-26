@@ -655,6 +655,61 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
+        if (message.command === 'generateAgentMd') {
+          const repoUrl = message.repoUrl || '';
+          baseUrl = message.baseUrl || baseUrl;
+          LLMmodel = message.model || LLMmodel;
+
+          bonsaiLog('Generating AGENTS.MD for repo:', repoUrl);
+          panel.webview.postMessage({ command: 'loading', text: 'Parsing GitHub repository URL...' });
+
+          try {
+            const parsed = parseGitHubUrl(repoUrl);
+            if (!parsed) {
+              throw new Error('Invalid GitHub URL. Expected format: https://github.com/owner/repo');
+            }
+
+            // Verify LLM connection first
+            bonsaiLog('Verifying LLM connection before generating AGENTS.MD');
+            if (!/^[\w.-]+(:\d+)?(\/[\w./]*)?$/.test(baseUrl)) {
+              throw new Error('Invalid LLM URL format. Expected format: host:port/path (e.g., localhost:1234/v1)');
+            }
+            const modelsRes = await fetch(`http://${baseUrl}/models`, {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer lm-studio' },
+              signal: AbortSignal.timeout(5000)
+            });
+            if (!modelsRes.ok) {
+              throw new Error(`LLM server returned ${modelsRes.status}: ${modelsRes.statusText}`);
+            }
+
+            // Fetch repo content from GitHub
+            panel.webview.postMessage({ command: 'loading', text: 'Fetching repository from GitHub...' });
+            const repoContent = await fetchGitHubRepoContent(parsed.owner, parsed.repo);
+            bonsaiLog('Repository content fetched. Length:', repoContent.length);
+
+            // Generate AGENTS.MD via LLM
+            panel.webview.postMessage({ command: 'loading', text: 'Generating AGENTS.MD with LLM...' });
+            const { content: agentsMd, reasoning } = await generateAgentMdFromRepo(repoContent);
+            bonsaiLog('AGENTS.MD generated successfully. Length:', agentsMd.length);
+
+            panel.webview.postMessage({
+              command: 'generateAgentMdResult',
+              success: true,
+              content: agentsMd,
+              reasoning
+            });
+          } catch (err: any) {
+            bonsaiLog('AGENTS.MD generation failed:', err?.message || err);
+            panel.webview.postMessage({
+              command: 'generateAgentMdResult',
+              success: false,
+              message: err?.message || 'Generation failed'
+            });
+          }
+          return;
+        }
+
         if (message.command === 'generate') {
           const selectedNodeIdForPrompt = selectedNodeId;
           let code = message.code;
@@ -1125,6 +1180,233 @@ Validate your output against the RULES before responding.
   }
 
   throw new Error("Failed to generate code from Agent.md after multiple attempts");
+}
+
+// ---------------------------------------------------------------------------
+// GitHub helpers – fetch repository structure and key files
+// ---------------------------------------------------------------------------
+
+/** Parse owner and repo name from a GitHub URL */
+function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
+  // Support formats: https://github.com/owner/repo, github.com/owner/repo, owner/repo
+  const match = url.trim().match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+)|^([^/\s]+)\/([^/\s#?]+)$/);
+  if (match) {
+    const owner = match[1] || match[3];
+    const repo = (match[2] || match[4]).replace(/\.git$/, '');
+    return { owner, repo };
+  }
+  return null;
+}
+
+/** Fetch the repository tree and key file contents from GitHub API */
+async function fetchGitHubRepoContent(owner: string, repo: string): Promise<string> {
+  const headers: Record<string, string> = {
+    'Accept': 'application/vnd.github.v3+json',
+    'User-Agent': 'BonsAIDE'
+  };
+
+  // 1. Fetch repo metadata
+  const repoRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { headers, signal: AbortSignal.timeout(15000) });
+  if (!repoRes.ok) {
+    throw new Error(`GitHub API error: ${repoRes.status} ${repoRes.statusText}`);
+  }
+  const repoData: any = await repoRes.json();
+  const defaultBranch = repoData.default_branch || 'main';
+  const description = repoData.description || '';
+  const language = repoData.language || '';
+
+  // 2. Fetch directory tree (recursive)
+  const treeRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`, { headers, signal: AbortSignal.timeout(15000) });
+  if (!treeRes.ok) {
+    throw new Error(`GitHub tree API error: ${treeRes.status} ${treeRes.statusText}`);
+  }
+  const treeData: any = await treeRes.json();
+  const allFiles: string[] = (treeData.tree || [])
+    .filter((item: any) => item.type === 'blob')
+    .map((item: any) => item.path);
+
+  // 3. Identify key files to fetch content for
+  const keyPatterns = [
+    /^readme\.md$/i,
+    /^package\.json$/i,
+    /^pyproject\.toml$/i,
+    /^cargo\.toml$/i,
+    /^go\.mod$/i,
+    /^pom\.xml$/i,
+    /^build\.gradle$/i,
+    /^makefile$/i,
+    /^dockerfile$/i,
+    /^requirements\.txt$/i,
+    /^setup\.py$/i,
+    /^tsconfig\.json$/i,
+    /^agents\.md$/i,
+  ];
+
+  // Also grab top-level source entry points (e.g. src/main.*, src/index.*, app.*, main.*)
+  const entryPatterns = [
+    /^(?:src\/)?(?:main|index|app|server|extension)\.[a-z]+$/i,
+  ];
+
+  const keyFiles = allFiles.filter(f => {
+    const basename = f.split('/').pop() || '';
+    return keyPatterns.some(p => p.test(basename)) || entryPatterns.some(p => p.test(f));
+  });
+
+  // Limit to a reasonable number of files
+  const filesToFetch = keyFiles.slice(0, 15);
+
+  // 4. Fetch contents of key files (in parallel, with size limits)
+  const fileContents: { path: string; content: string }[] = [];
+  const MAX_FILE_SIZE = 8000; // characters per file
+
+  await Promise.all(filesToFetch.map(async (filePath) => {
+    try {
+      const fileRes = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeURIComponent(filePath)}?ref=${encodeURIComponent(defaultBranch)}`,
+        { headers, signal: AbortSignal.timeout(10000) }
+      );
+      if (!fileRes.ok) { return; }
+      const fileData: any = await fileRes.json();
+      if (fileData.encoding === 'base64' && fileData.content) {
+        let decoded = Buffer.from(fileData.content, 'base64').toString('utf-8');
+        if (decoded.length > MAX_FILE_SIZE) {
+          decoded = decoded.substring(0, MAX_FILE_SIZE) + '\n... (truncated)';
+        }
+        fileContents.push({ path: filePath, content: decoded });
+      }
+    } catch { /* skip files that fail */ }
+  }));
+
+  // 5. Compose the summary for the LLM
+  let summary = `# Repository: ${owner}/${repo}\n`;
+  summary += `- Description: ${description}\n`;
+  summary += `- Primary language: ${language}\n`;
+  summary += `- Default branch: ${defaultBranch}\n`;
+  summary += `- Total files: ${allFiles.length}\n\n`;
+
+  summary += `## Directory structure\n\`\`\`\n`;
+  // Show a compact tree (limit depth to avoid overwhelming the LLM)
+  const treeLines = allFiles.filter(f => {
+    const depth = f.split('/').length;
+    return depth <= 3;
+  });
+  summary += treeLines.slice(0, 150).join('\n');
+  if (treeLines.length > 150) { summary += '\n... (truncated)'; }
+  summary += '\n```\n\n';
+
+  summary += `## Key file contents\n\n`;
+  for (const fc of fileContents) {
+    summary += `### ${fc.path}\n\`\`\`\n${fc.content}\n\`\`\`\n\n`;
+  }
+
+  return summary;
+}
+
+// ---------------------------------------------------------------------------
+// LLM – generateAgentMdFromRepo (generates AGENTS.MD from a GitHub repository)
+// ---------------------------------------------------------------------------
+
+export async function generateAgentMdFromRepo(
+  repoContent: string
+): Promise<{ content: string; reasoning: string }> {
+  const systemPrompt = `
+You are an expert technical writer and software architect. You will be given information about a GitHub repository including its structure, metadata, and key file contents.
+
+Your job is to generate a comprehensive AGENTS.MD file that summarizes the repository. The AGENTS.MD should help developers and AI agents quickly understand the codebase.
+
+You MUST return output using ONLY the two XML tags below, with nothing before or after them. Absolutely NO backticks wrapping the entire output, NO prose outside the tags.
+
+### REQUIRED SCHEMA (use exactly these tags and order):
+<code>
+[ONLY the final AGENTS.MD content here — valid Markdown format]
+</code>
+<reasoning>
+[ONLY the explanation of how you analyzed the repository and what you included — plain text, no code fences]
+</reasoning>
+
+### AGENTS.MD CONTENT GUIDELINES:
+The generated AGENTS.MD should include these sections (adapt based on what's relevant):
+1) **Repository Overview** – Brief description of what the project does
+2) **Environment Setup** – How to install dependencies and set up the development environment
+3) **Build & Run** – Commands to build, run, and test the project
+4) **Architecture** – High-level description of the codebase structure and key modules
+5) **Key Files & Directories** – Table mapping paths to their purposes
+6) **Code Conventions** – Naming patterns, style guidelines, important patterns used
+7) **Testing** – How tests are organized and run
+8) **Dependencies** – Key runtime and development dependencies
+9) **Configuration** – Environment variables, config files, and their purpose
+10) **Security Notes** – Any security-relevant information
+
+### RULES (strict):
+1) Output MUST start with "<code>" on the first line and end with "</reasoning>" on the last line.
+2) No additional tags, headers, or text outside the two blocks.
+3) The content inside <code> MUST be valid Markdown suitable for an AGENTS.MD file.
+4) Put ALL explanation inside <reasoning>. Do NOT include code fences there.
+5) Do NOT wrap anything in triple backticks outside the tags.
+6) Be thorough but concise. Focus on actionable information that helps someone work with the codebase.
+
+Validate your output against the RULES before responding.
+  `.trim();
+
+  const BASE_URL = baseUrl || "localhost:1234/v1";
+  const MODEL = LLMmodel || "deepseek/deepseek-r1-0528-qwen3-8b";
+  const API_KEY = "lm-studio";
+
+  async function requestLLM(): Promise<{ response: string; usage?: any }> {
+    const res = await fetch(`http://${BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `Analyze this GitHub repository and generate a comprehensive AGENTS.MD file:\n\n${repoContent}` },
+        ],
+        temperature: 0.7,
+        stream: false,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` - ${text}` : ""}`);
+    }
+
+    const json: any = await res.json();
+    const output =
+      json?.choices?.[0]?.message?.content?.trim?.() ??
+      json?.choices?.[0]?.text?.trim?.() ??
+      "";
+
+    return { response: output, usage: json?.usage };
+  }
+
+  // Try up to 3 times to get a valid response
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const data = await requestLLM();
+      const output = data.response;
+      const codeMatch = output.match(/<code>([\s\S]*?)<\/code>/i);
+      const reasoningMatch = output.match(/<reasoning>([\s\S]*?)<\/reasoning>/i);
+      const content = codeMatch?.[1]?.trim() ?? "";
+      const reasoning = reasoningMatch?.[1]?.trim() ?? "(no reasoning provided)";
+
+      if (content) {
+        return { content, reasoning };
+      } else {
+        console.warn("No <code> block found in LLM response. Retrying...");
+      }
+    } catch (err) {
+      console.warn("Error during AGENTS.MD generation:", (err as Error).message);
+      if (attempt === 2) throw err;
+    }
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+
+  throw new Error("Failed to generate AGENTS.MD after multiple attempts");
 }
 
 

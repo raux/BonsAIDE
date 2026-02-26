@@ -167,6 +167,31 @@ document.getElementById('btnTestConnection').addEventListener('click', function 
     vscode.postMessage({ command: 'testConnection', baseUrl: baseUrl, model: model });
 });
 
+// Generate AGENTS.MD button handler
+document.getElementById('btnGenerateAgentMd').addEventListener('click', function () {
+    var repoUrl = document.getElementById('githubRepoUrl').value || '';
+    var statusEl = document.getElementById('generateAgentMdStatus');
+    if (!repoUrl.trim()) {
+        if (statusEl) {
+            statusEl.textContent = 'Please enter a GitHub repository URL.';
+            statusEl.className = 'error';
+        }
+        return;
+    }
+    if (statusEl) {
+        statusEl.textContent = 'Generating...';
+        statusEl.className = 'processing';
+    }
+    var baseUrl = document.getElementById('baseUrlInput').value || '';
+    var model = document.getElementById('modelInput').value || '';
+    vscode.postMessage({
+        command: 'generateAgentMd',
+        repoUrl: repoUrl,
+        baseUrl: baseUrl,
+        model: model
+    });
+});
+
 /* =============================================================
    3.  General helpers
    ============================================================= */
@@ -347,6 +372,26 @@ window.addEventListener('message', function (event) {
             if (statusEl) {
                 statusEl.textContent = '✗ ' + (message.message || 'Processing failed');
                 statusEl.className = 'error';
+            }
+        }
+    }
+
+    if (message.command === 'generateAgentMdResult') {
+        var genStatusEl = document.getElementById('generateAgentMdStatus');
+        var genTextarea = document.getElementById('generatedAgentMd');
+        if (message.success) {
+            if (genTextarea && message.content) {
+                genTextarea.value = message.content;
+                genTextarea.style.display = 'block';
+            }
+            if (genStatusEl) {
+                genStatusEl.textContent = '✓ AGENTS.MD generated successfully!';
+                genStatusEl.className = 'success';
+            }
+        } else {
+            if (genStatusEl) {
+                genStatusEl.textContent = '✗ ' + (message.message || 'Generation failed');
+                genStatusEl.className = 'error';
             }
         }
     }
