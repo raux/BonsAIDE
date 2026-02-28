@@ -204,6 +204,15 @@
         <button id="btnTestConnection" title="Test connection to LM Studio" aria-label="Test connection to LM Studio">Test Connection</button>
         <span id="connectionTestStatus" aria-live="polite"></span>
     </div>
+    <h2>Generate AGENTS.MD from GitHub Repository <small style="font-weight:400; font-size:0.9em;">(<a href="https://github.com/raux/BonsAIDE" target="_blank" rel="noreferrer">GitHub</a>)</small></h2>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+        <label>GitHub Repository URL:
+            <input id="githubRepoUrl" type="text" size="50" placeholder="https://github.com/owner/repo" />
+        </label>
+        <button id="btnGenerateAgentMd" title="Fetch repository from GitHub and generate AGENTS.MD using LLM">📝 Generate AGENTS.MD</button>
+        <span id="generateAgentMdStatus" style="margin-left:8px;"></span>
+    </div>
+    <textarea style="width:100%; display:none;" id="generatedAgentMd" rows="15" cols="60" readonly placeholder="Generated AGENTS.MD content will appear here..."></textarea>
     <!-- Bonsai Graph -->
     <div id="graph" style="width: 100%; height: 500px; border: 1px solid #ddd;"></div>
     <button id="btnExportJson" title="Export current Bonsai as JSON">Export JSON</button>
@@ -219,16 +228,6 @@
         <button id="btnProcessAgentMd" class="btn-process-agent" title="Process the Agent.md content with the LLM to generate source code">⚡ Process Agent.md</button>
         <span id="agentMdProcessStatus" style="margin-left:8px;"></span>
     </div>
-
-    <h2>Generate AGENTS.MD from GitHub Repository</h2>
-    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
-        <label>GitHub Repository URL:
-            <input id="githubRepoUrl" type="text" size="50" placeholder="https://github.com/owner/repo" />
-        </label>
-        <button id="btnGenerateAgentMd" title="Fetch repository from GitHub and generate AGENTS.MD using LLM">📝 Generate AGENTS.MD</button>
-        <span id="generateAgentMdStatus" style="margin-left:8px;"></span>
-    </div>
-    <textarea style="width:100%; display:none;" id="generatedAgentMd" rows="15" cols="60" readonly placeholder="Generated AGENTS.MD content will appear here..."></textarea>
 
     <h2>Source code of the node selected</h2>
     <textarea style="width: 100%;" id="code" rows="10"
