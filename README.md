@@ -11,6 +11,8 @@ Paste your code, then apply activities powered by an **LLM** to generate **multi
 
 ![Bonsai web UI](https://github.com/user-attachments/assets/1c8ed723-114c-4bf3-8352-d143c653707a)
 
+> Note: The legacy VS Code extension has been removed. Bonsai now runs purely as a standalone web app served from this repository.
+
 ---
 
 ## Installation
@@ -88,6 +90,6 @@ The server exposes the following HTTP endpoints:
 ## Links
 
 * Quick Start & Tutorial: `TUTORIAL.md`
-* Repository: [https://gitlab.com/dlumbrer/bonsai-vscode](https://gitlab.com/dlumbrer/bonsai-vscode)
+* Repository: [https://github.com/raux/BonsAIDE](https://github.com/raux/BonsAIDE)
 
 > **Privacy note:** Bonsai sends code/prompts to your configured LLM. Don't include secrets or proprietary data unless permitted.
