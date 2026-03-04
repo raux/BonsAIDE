@@ -73,6 +73,16 @@ Both values can also be configured interactively in the Bonsai UI.
 
 ---
 
+## UI Rearrangement & Interactivity Ideas
+
+- Make the left code input and right tree/details panes resizable, with a collapsible sidebar for logs/metrics to reduce clutter.
+- Add keyboard shortcuts for common actions (spawn N branches, trim node, jump to parent) plus a quick command palette.
+- Provide drag-to-pan and scroll-to-zoom mini-map of the tree to jump across large explorations quickly.
+- Enable hover previews for node details (diff, metrics, reasoning) and single-click to pin the full panel.
+- Let users reorder or pin activity buttons and remembered branch counts so their frequent workflows stay close at hand.
+
+---
+
 ## API Endpoints
 
 The server exposes the following HTTP endpoints:
