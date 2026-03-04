@@ -9,7 +9,7 @@ Paste your code, then apply activities powered by an **LLM** to generate **multi
 
 **Fill color = last activity**, **leaf borders = similarity** (blue→red vs. the selected leaf), **right-click → Trim** to prune subtrees, and **Export/Import** sessions as JSON.
 
-![Bonsai web UI](https://github.com/user-attachments/assets/1c8ed723-114c-4bf3-8352-d143c653707a)
+![Bonsai web UI](other/bonsaide-initial-state.png)
 
 > Note: The legacy VS Code extension has been removed. Bonsai now runs purely as a standalone web app served from this repository.
 
@@ -69,17 +69,17 @@ Both values can also be configured interactively in the Bonsai UI.
 7. **Right-click → Trim** to prune a node and its children.
 8. **Export JSON** to save; **Import JSON** to restore.
 
-![Activities and controls](https://github.com/user-attachments/assets/f1956ca3-7694-45af-b850-792f60ed93ac)
+![Agent.md loaded state](other/bonsaide-after-load-agent-md.png)
 
 ---
 
 ## UI Rearrangement & Interactivity Ideas
 
-- Make the left code input and right tree/details panes resizable, with a collapsible sidebar for logs/metrics to reduce clutter.
-- Add keyboard shortcuts for common actions (spawn N branches, trim node, jump to parent) plus a quick command palette.
-- Provide drag-to-pan and scroll-to-zoom mini-map of the tree to jump across large explorations quickly.
-- Enable hover previews for node details (diff, metrics, reasoning) and single-click to pin the full panel.
-- Let users reorder or pin activity buttons and remembered branch counts so their frequent workflows stay close at hand.
+- Keep the code input, tree canvas, and details panel resizable with quick toggle buttons to focus on one region at a time.
+- Add keyboard shortcuts and a tiny command palette for spawn/trim/select-parent plus a repeat-last-action hotkey.
+- Surface connection + Agent.md load state inline in the header with a one-click reconnect or reload control.
+- Collapse logs/metrics/diff panes into tabs next to Details and pair them with a small mini-map for quick jumps.
+- Let users pin favorite activities and branch counts into a compact action bar near the header.
 
 ---
 
