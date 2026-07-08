@@ -58,9 +58,22 @@ Both values can also be configured interactively in the Bonsai UI.
 
 ### Pi model registry integration
 
-If you use [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent), click **Load Pi Models** in the Bonsai UI to list available models from Pi's model registry. BonsAIDE only enables local `openai-completions` endpoints such as LM Studio, Ollama, or vLLM because the current BonsAIDE execution path uses `/chat/completions` with a local placeholder bearer token.
+If you use [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent), click **Load Pi Models** in the Bonsai UI to list available models from Pi's model registry.
 
-BonsAIDE does **not** copy Pi API keys, auth files, headers, or command-resolved secrets into this repository or the browser. Non-local/cloud Pi models are shown as unsupported until BonsAIDE has a Pi-backed execution path.
+#### Local models
+BonsAIDE supports local `openai-completions` endpoints (LM Studio, Ollama, vLLM) with no credential handling — they run on localhost with a placeholder bearer token.
+
+#### Subscription/cloud models
+BonsAIDE also lists subscription-based models (OpenAI, Anthropic Claude, Google, etc.) via Pi's SDK. These models are:
+- **Credential-safe**: All API keys and auth tokens are resolved by Pi from `~/.pi/agent/auth.json`, never exposed to BonsAIDE
+- **On-demand**: Use `pi /login <provider>` to add credentials for cloud models you want to use (e.g., `pi /login anthropic`)
+- **Delegated**: BonsAIDE delegates code generation to Pi's AgentSession, which manages the request lifecycle
+
+To use a cloud model:
+1. Open Pi and run `/login <provider>` (e.g., `/login openai`)
+2. Return to BonsAIDE and click **Load Pi Models**
+3. Select your cloud model from the dropdown
+4. Generate code as usual
 
 ---
 

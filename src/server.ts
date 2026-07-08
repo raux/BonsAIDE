@@ -26,6 +26,7 @@ import { analyzeCodeWithLizardServer } from './lizard-server';
 import { Branch, CodeNode, LizardMetrics, createGraphFromBranch, importBonsaiPayload, trimBranchAtNode } from './bonsai-state';
 import { analyzeRepoForIssue, writeFixSpecFile, RepoIssueAnalysis } from './repo-analyzer';
 import { discoverPiModels } from './pi-models';
+import { generateViaSubscription } from './pi-subscription-rpc';
 import { buildLmStudioUrl, formatGitHubIssues, GitHubIssueForDisplay, mimeType, parseGitHubUrl } from './server-utils';
 
 // ---------------------------------------------------------------------------
@@ -720,13 +721,40 @@ async function handleMessage(message: any): Promise<void> {
 
       bonsaiLog('Generating branches from #', selectedNodeIdForPrompt, 'num branches:', versionCount);
 
+      // Check if this is a subscription model (format: pi:provider:modelId)
+      const isSubscriptionModel = typeof LLMmodel === 'string' && LLMmodel.startsWith('pi:');
+      const subscriptionMatch = isSubscriptionModel ? LLMmodel.match(/^pi:([^:]+):(.+)$/) : null;
+
       for (let i = 0; i < versionCount; i++) {
         const currentCount = i + 1;
         bonsaiLog('Generating version', currentCount, 'of', versionCount);
         broadcast({ command: 'loading', text: `Generating branch ${currentCount} of ${versionCount}...` });
 
         const start = performance.now();
-        const { content: result, reasoning, tokens } = await fetchFromLocalLMStudio(message.prompt, code);
+        let result: string;
+        let reasoning: string;
+        let tokens: { prompt: number; completion: number; total: number };
+
+        if (subscriptionMatch) {
+          const provider = subscriptionMatch[1];
+          const modelId = subscriptionMatch[2];
+          bonsaiLog(`Generating via Pi subscription model: ${provider}/${modelId}`);
+          const subscriptionResult = await generateViaSubscription({
+            provider,
+            modelId,
+            prompt: message.prompt,
+            code
+          });
+          result = subscriptionResult.content;
+          reasoning = subscriptionResult.reasoning;
+          tokens = subscriptionResult.tokens;
+        } else {
+          const localResult = await fetchFromLocalLMStudio(message.prompt, code);
+          result = localResult.content;
+          reasoning = localResult.reasoning;
+          tokens = localResult.tokens;
+        }
+
         const duration = performance.now() - start;
 
         bonsaiLog(`Version ${i + 1} generated in ${duration.toFixed(2)} ms`);

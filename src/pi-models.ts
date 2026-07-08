@@ -6,6 +6,7 @@ export interface PiModelCandidate {
   api: string;
   baseUrl?: string;
   compatible: boolean;
+  subscription?: boolean;
   reason: string;
 }
 
@@ -74,8 +75,9 @@ function toCandidate(model: unknown, providerDisplayName: (provider: string) => 
       provider,
       providerName,
       api,
-      compatible: false,
-      reason: `Pi model uses ${api}; BonsAIDE currently supports local OpenAI chat-completions endpoints only.`
+      compatible: true,
+      subscription: true,
+      reason: `Cloud model via Pi SDK. Credentials secured in Pi auth; never exposed to BonsAIDE.`
     };
   }
 

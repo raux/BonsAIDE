@@ -267,20 +267,25 @@ function appendPiModelsToDropdown(models) {
     models.forEach(function (model) {
         if (!model || !model.id || !model.provider) { return; }
 
-        var optionValue = 'pi:' + model.provider + ':' + model.id;
+        var isSubscription = Boolean(model.subscription);
+        var optionValue = isSubscription ? ('pi:' + model.provider + ':' + model.id) : ('pi:' + model.provider + ':' + model.id);
         var exists = Array.prototype.some.call(modelInput.options, function (option) {
             return option.value === optionValue;
         });
         if (exists) { return; }
 
+        var label = isSubscription ? ('[Cloud] ' + model.providerName + ' / ' + model.id) : ('[Pi] ' + model.providerName + ' / ' + model.id);
         var option = document.createElement('option');
         option.value = optionValue;
-        option.textContent = '[Pi] ' + model.providerName + ' / ' + model.id + (model.compatible ? '' : ' (not supported)');
+        option.textContent = label + (model.compatible ? '' : ' (auth required)');
         option.title = model.reason || '';
         option.disabled = !model.compatible;
-        option.setAttribute('data-source', 'pi');
+        option.setAttribute('data-source', isSubscription ? 'pi-subscription' : 'pi-local');
         option.setAttribute('data-model-id', model.id);
-        if (model.baseUrl) {
+        option.setAttribute('data-provider', model.provider);
+        if (isSubscription) {
+            option.setAttribute('data-subscription', 'true');
+        } else if (model.baseUrl) {
             option.setAttribute('data-base-url', model.baseUrl);
         }
         modelInput.appendChild(option);
@@ -614,8 +619,13 @@ window.addEventListener('message', function (event) {
         if (message.success) {
             var added = appendPiModelsToDropdown(message.models || []);
             if (piStatusEl) {
+                var cloudModels = (message.models || []).filter(function(m) { return m.subscription; }).length;
+                var localModels = (message.models || []).filter(function(m) { return !m.subscription; }).length;
                 var warning = message.warning ? ' Config warning: ' + message.warning : '';
-                piStatusEl.textContent = '✓ Loaded ' + message.compatibleCount + ' compatible Pi model' + (message.compatibleCount === 1 ? '' : 's') + ' (' + message.totalCount + ' available).' + (added ? '' : ' Already loaded.') + warning;
+                var counts = [];
+                if (localModels > 0) { counts.push(localModels + ' local'); }
+                if (cloudModels > 0) { counts.push(cloudModels + ' cloud'); }
+                piStatusEl.textContent = '✓ Loaded ' + counts.join(' + ') + ' Pi model' + ((localModels + cloudModels) === 1 ? '' : 's') + '. Cloud models require auth via Pi.' + (added ? '' : ' Already loaded.') + warning;
                 piStatusEl.className = 'connection-success';
             }
         } else if (piStatusEl) {

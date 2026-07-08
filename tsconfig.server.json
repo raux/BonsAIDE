@@ -15,6 +15,7 @@
     "src/repo-analyzer.ts",
     "src/server-utils.ts",
     "src/pi-models.ts",
+    "src/pi-subscription-rpc.ts",
     "src/lizard-server.ts",
     "src/similarity.ts"
   ]
