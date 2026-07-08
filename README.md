@@ -116,6 +116,28 @@ The server exposes the following HTTP endpoints:
 
 ---
 
+## Agent & Contributor Documentation
+
+BonsAIDE includes repository-specific documentation to help human contributors and coding agents, especially local models, understand and maintain the project safely.
+
+Start here:
+
+* Contributor and agent rules: `AGENTS.md`
+* Architecture and maintenance overview: `REPOSITORY_ANALYSIS.md`
+* Agent skills proposal summary: `SKILLS_PROPOSAL_SUMMARY.md`
+* Skills library entry point: `.pi/agent/skills/README.md`
+* Task-to-skill router: `.pi/agent/skills/INDEX.md`
+
+Specialized maintenance skills:
+
+* `.pi/agent/skills/llm-integration-specialist/SKILL.md` — LM Studio, Pi model registry, cloud model delegation, prompt parsing, and token handling
+* `.pi/agent/skills/state-and-protocol-guide/SKILL.md` — Bonsai state, branches/nodes, import/export schema, graph rendering, and browser/server protocol
+* `.pi/agent/skills/similarity-and-analysis-crew/SKILL.md` — TF-IDF similarity, Lizard metrics, GitHub issue/repository analysis, and analysis tests
+
+Recommended agent flow: read `AGENTS.md`, skim `REPOSITORY_ANALYSIS.md`, choose a task-specific skill through `.pi/agent/skills/INDEX.md`, then run `npm run lint && npm run compile && npm run test` before committing code changes.
+
+---
+
 ## Links
 
 * Quick Start & Tutorial: `TUTORIAL.md`
