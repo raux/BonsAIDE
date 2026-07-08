@@ -970,6 +970,8 @@ async function handleMessage(message: any): Promise<void> {
     broadcast({ command: 'repoIssueAnalysisResult', success: false, loading: true, message: 'Preparing repository analysis...' });
 
     try {
+      // Step 1: Validate URL
+      broadcast({ command: 'analysisLogStep', stepIndex: 0, action: 'add', stepName: 'Validating URL', status: 'running' });
       const parsed = parseGitHubUrl(repoUrl);
       if (!parsed) {
         throw new Error('Invalid GitHub URL. Expected format: https://github.com/owner/repo');
@@ -977,15 +979,42 @@ async function handleMessage(message: any): Promise<void> {
       if (!issue || typeof issue.title !== 'string' || typeof issue.number !== 'number') {
         throw new Error('Select an issue before analyzing the repository.');
       }
+      broadcast({ command: 'analysisLogStep', stepIndex: 0, action: 'update', status: 'completed', detail: `${parsed.owner}/${parsed.repo}` });
 
-      broadcast({ command: 'repoIssueAnalysisResult', success: false, loading: true, message: 'Cloning or updating repository cache and gathering code context...' });
+      // Step 2: Clone/checkout repository
+      let stepIndex = 1;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Cloning/updating repository', status: 'running' });
       const analysis = await analyzeRepoForIssue(parsed.owner, parsed.repo, issue);
-      broadcast({ command: 'repoIssueAnalysisResult', success: false, loading: true, message: `Found ${analysis.snippets.length} likely impacted snippet(s). Asking local model for agentic fix specification...` });
-      analysis.agenticAnalysis = await generateAgenticFixAnalysis(analysis);
-      analysis.specPath = await writeFixSpecFile(analysis);
-      analysis.content = `${analysis.content.replace(/\n\nFix specification file:\n[\s\S]*$/, '')}\n\nAgentic fix analysis:\n${analysis.agenticAnalysis}\n\nFix specification file:\n${analysis.specPath}`;
-      broadcast({ command: 'repoIssueAnalysisResult', success: false, loading: true, message: `Agentic analysis complete. Creating Bonsai node...` });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${analysis.repoPath}` });
 
+      // Step 3: Extract keywords
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Extracting keywords', status: 'running' });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${analysis.keywords.length} keyword(s): ${analysis.keywords.slice(0, 3).join(', ')}...` });
+
+      // Step 4: Finding impacted snippets
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Finding impacted snippets', status: 'running' });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${analysis.snippets.length} snippet(s) found` });
+
+      // Step 5: Sending to LLM
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Sending to LLM for analysis', status: 'running', detail: `Model: ${LLMmodel}` });
+      analysis.agenticAnalysis = await generateAgenticFixAnalysis(analysis);
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed' });
+
+      // Step 6: Writing fix specification
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Writing fix specification file', status: 'running' });
+      analysis.specPath = await writeFixSpecFile(analysis);
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: analysis.specPath });
+      
+      analysis.content = `${analysis.content.replace(/\n\nFix specification file:\n[\s\S]*$/, '')}\n\nAgentic fix analysis:\n${analysis.agenticAnalysis}\n\nFix specification file:\n${analysis.specPath}`;
+
+      // Step 7: Creating Bonsai node
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Creating Bonsai node', status: 'running' });
+      
       let branch = branches.find(b => b.id === activeBranchId);
       if (!branch) {
         initFreshBonsai();
@@ -1011,6 +1040,7 @@ async function handleMessage(message: any): Promise<void> {
 
       branch.nodes.push(newNode);
       selectedNodeId = newNode.id;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `Node #${newNode.id}` });
 
       broadcast({ command: 'historyUpdate', history: branch.nodes });
       broadcast({ command: 'renderGraph', graph: createGraphFromBranch(branch) });
@@ -1029,6 +1059,7 @@ async function handleMessage(message: any): Promise<void> {
       bonsaiLog('Agentic repo issue analysis node created:', newNode.id, 'snippets:', analysis.snippets.length);
     } catch (err: any) {
       bonsaiLog('Repo issue analysis failed:', err?.message || err);
+      broadcast({ command: 'analysisLogStep', action: 'error', detail: err?.message || 'Unknown error' });
       broadcast({
         command: 'repoIssueAnalysisResult',
         success: false,

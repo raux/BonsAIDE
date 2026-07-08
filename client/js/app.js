@@ -131,6 +131,28 @@ document.getElementById('modelInput').addEventListener('change', function () {
     applySelectedModelConfiguration();
 });
 
+// Analysis log toggle and clear button handlers
+var btnToggleLog = document.getElementById('btnToggleAnalysisLog');
+var logContent = document.getElementById('analysisLogContent');
+var btnClearLog = document.getElementById('btnClearAnalysisLog');
+
+if (btnToggleLog && logContent) {
+    btnToggleLog.addEventListener('click', function () {
+        var isHidden = logContent.style.display === 'none';
+        logContent.style.display = isHidden ? 'block' : 'none';
+        btnToggleLog.textContent = (isHidden ? '▼' : '▶') + ' Analysis Log';
+        if (btnClearLog) {
+            btnClearLog.style.display = isHidden ? 'inline-block' : 'none';
+        }
+    });
+}
+
+if (btnClearLog) {
+    btnClearLog.addEventListener('click', function () {
+        analysisLogClear();
+    });
+}
+
 // Collect GitHub issues button handler
 document.getElementById('btnCollectIssues').addEventListener('click', function () {
     var repoUrl = document.getElementById('githubRepoUrl').value || '';
@@ -170,15 +192,85 @@ document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', functi
         statusEl.className = 'issue-analysis-status processing';
     }
 
+    analysisLogClear();
+    var modelId = getSelectedModelId();
+    analysisLogSetModel(modelId);
+
     applySelectedModelConfiguration();
     vscode.postMessage({
         command: 'analyzeRepoForFix',
         repoUrl: repoUrl,
         issue: issue,
         baseUrl: document.getElementById('baseUrlInput').value || '',
-        model: getSelectedModelId()
+        model: modelId
     });
 });
+
+/* =============================================================
+   Analysis Log Pane Management
+   ============================================================= */
+
+var analysisLogState = { model: '', steps: [] };
+var analysisLogStartTime = 0;
+
+function analysisLogClear() {
+    analysisLogState = { model: '', steps: [] };
+    analysisLogStartTime = Date.now();
+    var stepsDiv = document.getElementById('analysisLogSteps');
+    if (stepsDiv) { stepsDiv.innerHTML = ''; }
+}
+
+function analysisLogSetModel(modelId) {
+    analysisLogState.model = modelId || 'Unknown';
+    var modelDiv = document.getElementById('analysisLogModel');
+    if (modelDiv) {
+        modelDiv.textContent = 'Model: ' + escapeHtml(analysisLogState.model);
+    }
+}
+
+function analysisLogAddStep(stepName, detail, status) {
+    var elapsed = Math.round((Date.now() - analysisLogStartTime) / 100) / 10 + 's';
+    var step = {
+        name: stepName,
+        detail: detail || '',
+        status: status || 'pending',
+        elapsed: elapsed
+    };
+    analysisLogState.steps.push(step);
+    analysisLogRender();
+}
+
+function analysisLogUpdateStep(stepIndex, status, detail) {
+    if (stepIndex >= 0 && stepIndex < analysisLogState.steps.length) {
+        analysisLogState.steps[stepIndex].status = status;
+        if (detail !== undefined) {
+            analysisLogState.steps[stepIndex].detail = detail;
+        }
+        analysisLogState.steps[stepIndex].elapsed = Math.round((Date.now() - analysisLogStartTime) / 100) / 10 + 's';
+        analysisLogRender();
+    }
+}
+
+function analysisLogRender() {
+    var stepsDiv = document.getElementById('analysisLogSteps');
+    if (!stepsDiv) { return; }
+    stepsDiv.innerHTML = '';
+    analysisLogState.steps.forEach(function (step, index) {
+        var stepEl = document.createElement('div');
+        stepEl.className = 'log-step ' + step.status;
+        var titleEl = document.createElement('span');
+        titleEl.className = 'log-step-title';
+        titleEl.textContent = step.name + ' [' + step.elapsed + ']';
+        stepEl.appendChild(titleEl);
+        if (step.detail) {
+            var detailEl = document.createElement('span');
+            detailEl.className = 'log-step-detail';
+            detailEl.textContent = step.detail;
+            stepEl.appendChild(detailEl);
+        }
+        stepsDiv.appendChild(stepEl);
+    });
+}
 
 /* =============================================================
    3.  General helpers
@@ -672,6 +764,16 @@ window.addEventListener('message', function (event) {
         if (message.success && message.node && message.node.code) {
             var codeEl = document.getElementById('code');
             if (codeEl) { codeEl.value = message.node.code; }
+        }
+    }
+
+    if (message.command === 'analysisLogStep') {
+        if (message.action === 'add') {
+            analysisLogAddStep(message.stepName, message.detail, message.status);
+        } else if (message.action === 'update') {
+            analysisLogUpdateStep(message.stepIndex, message.status, message.detail);
+        } else if (message.action === 'error') {
+            analysisLogAddStep('Error', message.detail, 'error');
         }
     }
 
