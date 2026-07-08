@@ -1,0 +1,94 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { buildRepoIssueSnippetNodes } from '../out-server/server.js';
+
+function makeIssue() {
+  return {
+    number: 840,
+    title: 'Parakeet can report No model loaded after auto-unload restore timeout',
+    html_url: 'https://github.com/TypeWhisper/typewhisper-mac/issues/840',
+    labels: [{ name: 'bug' }],
+    body: 'Auto-unload restore can fail with No model loaded.',
+    user: { login: 'SeoFood' },
+  };
+}
+
+function makeSnippet(index) {
+  return {
+    file: `TypeWhisper/Services/File${index}.swift`,
+    startLine: index * 10,
+    endLine: index * 10 + 4,
+    code: [`func restore${index}() {`, '  restoreModel()', '}'].join('\n'),
+    score: 100 - index,
+    reason: `Matched restore keyword ${index}`,
+  };
+}
+
+test('agentic repo analysis creates one Bonsai node per impacted snippet', () => {
+  const snippets = Array.from({ length: 8 }, (_, index) => makeSnippet(index + 1));
+  const result = buildRepoIssueSnippetNodes(
+    {
+      snippets,
+      keywords: ['parakeet', 'auto', 'unload', 'restore', 'timeout'],
+      specPath: 'artifacts/repo-analysis-specs/TypeWhisper__typewhisper-mac/issue-840.md',
+    },
+    makeIssue(),
+    { owner: 'TypeWhisper', repo: 'typewhisper-mac' },
+    7,
+    10
+  );
+
+  assert.equal(result.nodes.length, 8);
+  assert.equal(result.lastNodeId, 18);
+  assert.deepEqual(result.nodes.map(node => node.id), [11, 12, 13, 14, 15, 16, 17, 18]);
+  assert.ok(result.nodes.every(node => node.parentId === 7));
+  assert.ok(result.nodes.every(node => node.activity === 'repo_issue_analysis'));
+  assert.ok(result.nodes.every(node => node.isLeaf === true));
+  assert.equal(result.nodes[0].code, snippets[0].code);
+  assert.equal(result.nodes[7].code, snippets[7].code);
+  assert.match(result.nodes[0].prompt, /snippet 1\/8/);
+  assert.match(result.nodes[7].prompt, /snippet 8\/8/);
+});
+
+test('agentic repo analysis snippet nodes preserve file metadata and combined snippet content', () => {
+  const snippet = makeSnippet(3);
+  const result = buildRepoIssueSnippetNodes(
+    {
+      snippets: [snippet],
+      keywords: ['restore'],
+      specPath: 'artifacts/repo-analysis-specs/TypeWhisper__typewhisper-mac/issue-840.md',
+    },
+    makeIssue(),
+    { owner: 'TypeWhisper', repo: 'typewhisper-mac' },
+    null,
+    0
+  );
+
+  assert.equal(result.nodes.length, 1);
+  const [node] = result.nodes;
+  assert.equal(node.id, 1);
+  assert.equal(node.parentId, null);
+  assert.match(node.reasoning, /Repository: TypeWhisper\/typewhisper-mac/);
+  assert.match(node.reasoning, /Issue: #840/);
+  assert.match(node.reasoning, /Snippet: TypeWhisper\/Services\/File3\.swift:30-34/);
+  assert.match(node.reasoning, /Score: 97/);
+  assert.match(node.reasoning, /Reason: Matched restore keyword 3/);
+  assert.match(node.reasoning, /Keywords: restore/);
+  assert.match(node.reasoning, /No repository code was executed/);
+  assert.match(result.combinedSnippetContent, /Snippet 1: TypeWhisper\/Services\/File3\.swift:30-34/);
+  assert.match(result.combinedSnippetContent, /```\nfunc restore3\(\)/);
+});
+
+test('agentic repo analysis snippet node builder returns no aggregate node when no snippets exist', () => {
+  const result = buildRepoIssueSnippetNodes(
+    { snippets: [], keywords: [], specPath: undefined },
+    makeIssue(),
+    { owner: 'TypeWhisper', repo: 'typewhisper-mac' },
+    1,
+    20
+  );
+
+  assert.deepEqual(result.nodes, []);
+  assert.equal(result.lastNodeId, 20);
+  assert.equal(result.combinedSnippetContent, '');
+});

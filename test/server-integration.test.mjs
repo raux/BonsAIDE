@@ -50,6 +50,9 @@ test('GET / serves the browser UI', async () => {
     assert.match(res.headers['content-type'], /text\/html/);
     assert.match(res.body, /Bonsai IDE/);
     assert.match(res.body, /<select id="modelInput"/);
+    assert.match(res.body, /Test Pi Model/);
+    assert.doesNotMatch(res.body, /baseUrlInput/);
+    assert.doesNotMatch(res.body, /LM Studio URL/);
     assert.doesNotMatch(res.body, /deepseek\/deepseek-r1-0528-qwen3-8b<\/option>/);
     assert.match(res.body, /id="issuesExplorer"/);
     assert.match(res.body, /id="issuesList"/);

@@ -1,8 +1,10 @@
 # SKILL: BonsAIDE LLM Integration Guide
 
 **For:** Agents modifying code generation, model configuration, and LLM communication  
-**Scope:** LM Studio (local) and Pi subscription (cloud) model support  
-**Related files:** `src/server.ts`, `src/pi-models.ts`, `src/pi-subscription-rpc.ts`, `src/server-utils.ts`
+**Scope:** Pi-only model routing through Pi's model registry and AgentSession SDK  
+**Related files:** `src/server.ts`, `src/pi-models.ts`, `src/pi-subscription-rpc.ts`
+
+> **Current implementation note:** BonsAIDE no longer calls LM Studio/local OpenAI-compatible endpoints directly. Any older local-LM guidance below is historical; new work must route all LLM calls through Pi.
 
 ---
 

@@ -4,7 +4,6 @@ export interface PiModelCandidate {
   provider: string;
   providerName: string;
   api: string;
-  baseUrl?: string;
   compatible: boolean;
   subscription?: boolean;
   reason: string;
@@ -25,38 +24,7 @@ function safeString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function normalizeSafeBaseUrl(rawBaseUrl: unknown): { baseUrl?: string; isLocal: boolean; blockedReason?: string } {
-  const value = safeString(rawBaseUrl);
-  if (!value) {
-    return { isLocal: false, blockedReason: 'No base URL is configured for this model.' };
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return { isLocal: false, blockedReason: 'The configured base URL is not a valid absolute URL.' };
-  }
-
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { isLocal: false, blockedReason: 'Only http(s) OpenAI-compatible endpoints are supported.' };
-  }
-
-  if (parsed.username || parsed.password) {
-    return { isLocal: false, blockedReason: 'Base URLs with embedded credentials are intentionally not exposed.' };
-  }
-
-  parsed.username = '';
-  parsed.password = '';
-  parsed.hash = '';
-  parsed.search = '';
-  const normalized = parsed.toString().replace(/\/$/, '');
-  const hostname = parsed.hostname.toLowerCase();
-  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0';
-  return { baseUrl: normalized, isLocal };
-}
-
-function toCandidate(model: unknown, providerDisplayName: (provider: string) => string): PiModelCandidate | null {
+function toCandidate(model: unknown, modelRegistry: any, providerDisplayName: (provider: string) => string): PiModelCandidate | null {
   if (!isRecord(model)) { return null; }
 
   const id = safeString(model.id);
@@ -66,32 +34,9 @@ function toCandidate(model: unknown, providerDisplayName: (provider: string) => 
 
   const name = safeString(model.name) ?? id;
   const providerName = providerDisplayName(provider) || provider;
-  const base = normalizeSafeBaseUrl(model.baseUrl);
-
-  if (api !== 'openai-completions') {
-    return {
-      id,
-      name,
-      provider,
-      providerName,
-      api,
-      compatible: true,
-      subscription: true,
-      reason: `Cloud model via Pi SDK. Credentials secured in Pi auth; never exposed to BonsAIDE.`
-    };
-  }
-
-  if (!base.baseUrl || !base.isLocal) {
-    return {
-      id,
-      name,
-      provider,
-      providerName,
-      api,
-      compatible: false,
-      reason: base.blockedReason ?? 'Only local OpenAI-compatible endpoints are enabled without exposing Pi credentials.'
-    };
-  }
+  const hasAuth = typeof modelRegistry.hasConfiguredAuth === 'function'
+    ? Boolean(modelRegistry.hasConfiguredAuth(model))
+    : true;
 
   return {
     id,
@@ -99,19 +44,19 @@ function toCandidate(model: unknown, providerDisplayName: (provider: string) => 
     provider,
     providerName,
     api,
-    baseUrl: base.baseUrl,
-    compatible: true,
-    reason: 'Local OpenAI-compatible Pi model; usable with BonsAIDE chat-completions.'
+    compatible: hasAuth,
+    subscription: true,
+    reason: hasAuth
+      ? 'Pi-managed model. Credentials stay in Pi auth storage and are never exposed to BonsAIDE.'
+      : `Credentials are not configured for ${provider}. Run 'pi /login ${provider}' before using this model.`
   };
 }
 
 /**
  * Discover Pi models without exposing credentials.
  *
- * This intentionally calls ModelRegistry.getAvailable() only. It does not call
- * getApiKeyAndHeaders(), does not resolve command-backed secrets, and never
- * returns headers, API keys, auth records, or raw Pi config values beyond a
- * sanitized local base URL needed for BonsAIDE's current OpenAI-compatible path.
+ * BonsAIDE is Pi-only for LLM execution. We return Pi registry model metadata
+ * and never expose provider headers, API keys, or base URLs to the browser.
  */
 export async function discoverPiModels(): Promise<PiModelDiscoveryResult> {
   try {
@@ -129,7 +74,7 @@ export async function discoverPiModels(): Promise<PiModelDiscoveryResult> {
     };
 
     const models = (Array.isArray(available) ? available : [])
-      .map((model: unknown) => toCandidate(model, providerDisplayName))
+      .map((model: unknown) => toCandidate(model, modelRegistry, providerDisplayName))
       .filter((model: PiModelCandidate | null): model is PiModelCandidate => model !== null)
       .sort((a: PiModelCandidate, b: PiModelCandidate) => {
         if (a.compatible !== b.compatible) { return a.compatible ? -1 : 1; }

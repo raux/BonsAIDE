@@ -3,6 +3,8 @@
 **Last Updated:** 2026-07-08  
 **Repository:** https://github.com/raux/BonsAIDE
 
+> **Current LLM routing update:** BonsAIDE is now Pi-only for LLM execution. All model calls go through Pi's model registry and AgentSession SDK. Older references in this analysis to direct LM Studio/local OpenAI-compatible endpoints are historical and should not guide new implementation work.
+
 ---
 
 ## 1. Repository Overview

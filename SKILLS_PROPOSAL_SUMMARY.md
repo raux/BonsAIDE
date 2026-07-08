@@ -4,6 +4,8 @@
 **Repository:** https://github.com/raux/BonsAIDE  
 **Target:** Specialized skills to help agents (especially local models) maintain this repository
 
+> **Current LLM routing update:** BonsAIDE now routes all LLM calls through Pi. Direct LM Studio/local endpoint references in the original skills proposal are historical and should be treated as superseded by the Pi-only implementation.
+
 ---
 
 ## Executive Summary

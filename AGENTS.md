@@ -6,7 +6,7 @@ This file describes the current repository layout, build/test commands, and conv
 
 ## Repository Overview
 
-**BonsAIDE** (also called *Bonsai Code*) is a standalone web application for visual, tree-based code improvement. A local Node.js HTTP server serves the browser UI, maintains the in-memory Bonsai session, communicates with a local LM Studio OpenAI-compatible endpoint, computes code similarity, and optionally collects Lizard code metrics.
+**BonsAIDE** (also called *Bonsai Code*) is a standalone web application for visual, tree-based code improvement. A local Node.js HTTP server serves the browser UI, maintains the in-memory Bonsai session, delegates all LLM work through Pi's model registry/AgentSession SDK, computes code similarity, and optionally collects Lizard code metrics.
 
 The legacy VS Code extension implementation may still exist in the repository for reference, but the active product described by `README.md` is the standalone web app served from `client/` by `src/server.ts`.
 
@@ -72,16 +72,13 @@ Always run `npm run lint` and `npm run compile` before committing TypeScript cha
 
 ## LLM Configuration
 
-BonsAIDE connects to a local [LM Studio](https://lmstudio.ai/) OpenAI-compatible server.
+BonsAIDE is **Pi-only** for LLM execution. The server does not call LM Studio, Ollama, vLLM, or other local OpenAI-compatible endpoints directly.
 
 | Environment variable | Default | Description |
 |---|---|---|
-| `BONSAI_LM_URL` | `localhost:1234/v1` | Base URL/path for the LM Studio API |
-| `BONSAI_LM_MODEL` | `deepseek/deepseek-r1-0528-qwen3-8b` | Model identifier sent to chat-completions requests |
+| `BONSAI_PI_MODEL` | unset | Optional default model in `pi:<provider>:<model-id>` format, e.g. `pi:openai-codex:gpt-5.5` |
 
-Both values can also be configured in the browser UI.
-
-Implementation note: `src/server.ts` currently constructs LM Studio requests internally. When changing URL handling, keep the documented forms in `README.md` and this guide consistent with the code.
+Use `pi /login <provider>` to configure provider credentials in `~/.pi/agent/auth.json`, then click **Load Pi Models** in the browser UI. BonsAIDE delegates code generation and other LLM calls to Pi's AgentSession SDK; provider API keys and auth headers are never exposed to BonsAIDE.
 
 ---
 
@@ -91,11 +88,11 @@ Implementation note: `src/server.ts` currently constructs LM Studio requests int
 
 - Uses Node's built-in `http` module; there are no runtime npm dependencies.
 - Serves static frontend files from `client/`.
-- Maintains Bonsai state in memory: branches, nodes, selected node, LLM config, and logs.
+- Maintains Bonsai state in memory: branches, nodes, selected node, selected Pi model, and logs.
 - Sends server-to-browser updates over Server-Sent Events (`GET /events`).
 - Receives browser commands through JSON POSTs to `/message`.
 - Exposes JSON session export/import through `/export` and `/import`.
-- Calls LM Studio chat completions for code generation and Agent.md workflows.
+- Calls Pi AgentSession for code generation and Agent.md workflows.
 - Uses `src/similarity.ts` for leaf-code similarity and `src/lizard-server.ts` for optional metrics.
 
 ### Browser side (`client/`)
@@ -120,7 +117,7 @@ Common commands include:
 | `renderGraph` | server → browser | Replace the Cytoscape graph |
 | `historyUpdate` | server → browser | Refresh prompt/output history |
 | `leafSimilarities` | server → browser | Show similarity scores and graph borders |
-| `connectionTestResult` | server → browser | Show LM Studio connectivity status |
+| `connectionTestResult` | server → browser | Show selected Pi model availability/status |
 
 ---
 
@@ -169,7 +166,7 @@ When adding behavior, prefer adding targeted tests around pure or easily isolate
 - `src/similarity.ts` similarity ranking behavior
 - GitHub URL parsing and repository-summary helpers
 - Bonsai session import/export validation
-- LM Studio URL normalization and request construction
+- Pi model selection, credential-safe model discovery, and bounded LLM retry/error behavior
 - bounded retry/error behavior for LLM calls
 
 The existing `src/test/extension.test.ts` is legacy VS Code sample material and should not be treated as coverage for the standalone server.
@@ -187,7 +184,7 @@ The existing `src/test/extension.test.ts` is legacy VS Code sample material and 
 
 ## Security Notes
 
-- BonsAIDE sends user-provided code and prompts to the configured LM Studio endpoint. Do not send secrets or proprietary code unless permitted.
+- BonsAIDE sends user-provided code and prompts to the selected Pi model provider. Do not send secrets or proprietary code unless permitted.
 - Treat all imported JSON, LLM responses, GitHub-fetched content, and UI text fields as untrusted input.
 - Escape dynamic text before placing it in frontend HTML.
 - Be careful with local-server exposure: endpoints such as `/message` can trigger LLM work and state changes.

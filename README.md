@@ -40,40 +40,28 @@ npm run serve -- 4000
 
 ## Configuration
 
-### LM Studio URL
+### Pi-only model routing
 
-Set your LM Studio URL before launching:
+BonsAIDE routes **all LLM work through [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)**. The standalone server no longer calls LM Studio, Ollama, vLLM, or any other local OpenAI-compatible endpoint directly.
 
-* macOS/Linux: `export BONSAI_LM_URL=http://localhost:1234/v1`
-* Windows (PowerShell): `$env:BONSAI_LM_URL="http://localhost:1234/v1"`
+Pi resolves provider credentials from `~/.pi/agent/auth.json`; BonsAIDE never receives, stores, or logs API keys or provider headers.
 
-### Model
+To use models:
 
-Set your LM Studio model before launching:
+1. Open Pi and run `/login <provider>` for the providers you want to use, for example `pi /login openai` or `pi /login github-copilot`.
+2. Start BonsAIDE with `npm run serve`.
+3. Click **Load Pi Models** in the Bonsai UI.
+4. Select a configured Pi model from the dropdown.
+5. Click **Test Pi Model** to verify the selected model is available.
+6. Generate code or run repository analysis as usual.
 
-* macOS/Linux: `export BONSAI_LM_MODEL=deepseek/deepseek-r1-0528-qwen3-8b`
-* Windows (PowerShell): `$env:BONSAI_LM_MODEL="deepseek/deepseek-r1-0528-qwen3-8b"`
+Optional default model:
 
-Both values can also be configured interactively in the Bonsai UI.
+```bash
+export BONSAI_PI_MODEL="pi:openai-codex:gpt-5.5"
+```
 
-### Pi model registry integration
-
-If you use [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent), click **Load Pi Models** in the Bonsai UI to list available models from Pi's model registry.
-
-#### Local models
-BonsAIDE supports local `openai-completions` endpoints (LM Studio, Ollama, vLLM) with no credential handling — they run on localhost with a placeholder bearer token.
-
-#### Subscription/cloud models
-BonsAIDE also lists subscription-based models (OpenAI, Anthropic Claude, Google, etc.) via Pi's SDK. These models are:
-- **Credential-safe**: All API keys and auth tokens are resolved by Pi from `~/.pi/agent/auth.json`, never exposed to BonsAIDE
-- **On-demand**: Use `pi /login <provider>` to add credentials for cloud models you want to use (e.g., `pi /login anthropic`)
-- **Delegated**: BonsAIDE delegates code generation to Pi's AgentSession, which manages the request lifecycle
-
-To use a cloud model:
-1. Open Pi and run `/login <provider>` (e.g., `/login openai`)
-2. Return to BonsAIDE and click **Load Pi Models**
-3. Select your cloud model from the dropdown
-4. Generate code as usual
+The selected value must use Pi's `pi:<provider>:<model-id>` format.
 
 ---
 
@@ -130,7 +118,7 @@ Start here:
 
 Specialized maintenance skills:
 
-* `.pi/agent/skills/llm-integration-specialist/SKILL.md` — LM Studio, Pi model registry, cloud model delegation, prompt parsing, and token handling
+* `.pi/agent/skills/llm-integration-specialist/SKILL.md` — Pi model registry, model delegation, prompt parsing, and token handling
 * `.pi/agent/skills/state-and-protocol-guide/SKILL.md` — Bonsai state, branches/nodes, import/export schema, graph rendering, and browser/server protocol
 * `.pi/agent/skills/similarity-and-analysis-crew/SKILL.md` — TF-IDF similarity, Lizard metrics, GitHub issue/repository analysis, and analysis tests
 

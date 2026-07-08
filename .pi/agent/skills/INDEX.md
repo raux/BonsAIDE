@@ -9,7 +9,7 @@
 ### 1. **llm-integration-specialist**
 
 **Use when:**
-- Modifying LLM configuration (LM Studio or Pi models)
+- Modifying Pi-only LLM configuration and model routing
 - Changing the system prompt or `<code>`/`<reasoning>` parsing
 - Adding support for new model providers
 - Fixing token counting or timeout behavior
@@ -128,7 +128,7 @@ Choose based on interest:
 - **Validate imported JSON** defensively (schema, types, ranges)
 - **Test pure functions** with unit tests before integration tests
 - **Gracefully handle missing features** (e.g., Lizard not installed)
-- **Use env vars** for configuration (BONSAI_LM_URL, BONSAI_LM_MODEL, PORT)
+- **Use env vars** for configuration (`BONSAI_PI_MODEL`, `PORT`)
 - **Broadcast state changes** via SSE to keep browser in sync
 - **Type-coerce untrusted input** (imported JSON, LLM responses)
 
@@ -228,10 +228,11 @@ echo "Completed: [task], Modified: [files], Tested: [tests]" >> .pi/memory/lates
 - [ ] Ran `npm install`? (Updates eslint deps)
 - [ ] Check TypeScript strict mode is configured: `tsconfig.server.json`
 
-**Can't connect to LM Studio?**
-- [ ] LM Studio running? (Check http://localhost:1234)
-- [ ] Model loaded in LM Studio? (Check app UI)
-- [ ] Correct port in env var? (`echo $BONSAI_LM_URL`)
+**Can't use a Pi model?**
+- [ ] Run `pi /login <provider>` for the selected provider
+- [ ] Click **Load Pi Models** in the BonsAIDE UI
+- [ ] Ensure the selected value uses `pi:<provider>:<model-id>`
+- [ ] Optional default: `echo $BONSAI_PI_MODEL`
 
 **UI changes not reflecting?**
 - [ ] Recompiled? (`npm run compile`)

@@ -107,15 +107,13 @@ document.getElementById('btnImportJson').addEventListener('click', function () {
 });
 
 document.getElementById('btnTestConnection').addEventListener('click', function () {
-    applySelectedModelConfiguration();
-    const baseUrl = document.getElementById('baseUrlInput').value || '';
     const model = getSelectedModelId();
     const statusEl = document.getElementById('connectionTestStatus');
     if (statusEl) {
-        statusEl.textContent = 'Testing...';
+        statusEl.textContent = 'Testing Pi model...';
         statusEl.className = 'connection-testing';
     }
-    vscode.postMessage({ command: 'testConnection', baseUrl: baseUrl, model: model });
+    vscode.postMessage({ command: 'testConnection', model: model });
 });
 
 document.getElementById('btnLoadPiModels').addEventListener('click', function () {
@@ -188,7 +186,7 @@ document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', functi
     }
 
     if (statusEl) {
-        statusEl.textContent = 'Running agentic repository analysis with the selected local model...';
+        statusEl.textContent = 'Running repository analysis with the selected Pi model...';
         statusEl.className = 'issue-analysis-status processing';
     }
 
@@ -201,7 +199,6 @@ document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', functi
         command: 'analyzeRepoForFix',
         repoUrl: repoUrl,
         issue: issue,
-        baseUrl: document.getElementById('baseUrlInput').value || '',
         model: modelId
     });
 });
@@ -333,21 +330,14 @@ function selectedModelOption() {
 function getSelectedModelId() {
     var option = selectedModelOption();
     if (option) {
-        return option.getAttribute('data-model-id') || option.value || '';
+        return option.value || '';
     }
     var modelInput = document.getElementById('modelInput');
     return modelInput ? (modelInput.value || '') : '';
 }
 
 function applySelectedModelConfiguration() {
-    var option = selectedModelOption();
-    if (!option) { return; }
-
-    var baseUrl = option.getAttribute('data-base-url');
-    var baseUrlInput = document.getElementById('baseUrlInput');
-    if (baseUrl && baseUrlInput) {
-        baseUrlInput.value = baseUrl;
-    }
+    // Pi-only mode: all model execution is delegated through Pi by model value.
 }
 
 function appendPiModelsToDropdown(models) {
@@ -359,29 +349,30 @@ function appendPiModelsToDropdown(models) {
     models.forEach(function (model) {
         if (!model || !model.id || !model.provider) { return; }
 
-        var isSubscription = Boolean(model.subscription);
-        var optionValue = isSubscription ? ('pi:' + model.provider + ':' + model.id) : ('pi:' + model.provider + ':' + model.id);
-        var exists = Array.prototype.some.call(modelInput.options, function (option) {
-            return option.value === optionValue;
+        var optionValue = 'pi:' + model.provider + ':' + model.id;
+        var existingOption = null;
+        Array.prototype.some.call(modelInput.options, function (option) {
+            if (option.value === optionValue) {
+                existingOption = option;
+                return true;
+            }
+            return false;
         });
-        if (exists) { return; }
 
-        var label = isSubscription ? ('[Cloud] ' + model.providerName + ' / ' + model.id) : ('[Pi] ' + model.providerName + ' / ' + model.id);
-        var option = document.createElement('option');
+        var label = '[Pi] ' + model.providerName + ' / ' + model.id;
+        var option = existingOption || document.createElement('option');
         option.value = optionValue;
         option.textContent = label + (model.compatible ? '' : ' (auth required)');
         option.title = model.reason || '';
         option.disabled = !model.compatible;
-        option.setAttribute('data-source', isSubscription ? 'pi-subscription' : 'pi-local');
+        option.setAttribute('data-source', 'pi');
         option.setAttribute('data-model-id', model.id);
         option.setAttribute('data-provider', model.provider);
-        if (isSubscription) {
-            option.setAttribute('data-subscription', 'true');
-        } else if (model.baseUrl) {
-            option.setAttribute('data-base-url', model.baseUrl);
+        option.setAttribute('data-subscription', 'true');
+        if (!existingOption) {
+            modelInput.appendChild(option);
+            added += 1;
         }
-        modelInput.appendChild(option);
-        added += 1;
 
         if (model.compatible && !firstCompatibleValue) {
             firstCompatibleValue = optionValue;
@@ -690,8 +681,6 @@ window.addEventListener('message', function (event) {
     }
 
     if (message.command === 'urlmodelUpdate') {
-        const baseUrlInput = document.getElementById('baseUrlInput');
-        if (baseUrlInput && message.baseUrl) { baseUrlInput.value = message.baseUrl; }
         updateModelDropdown(message.availableModels, message.LLMmodel);
     }
 
@@ -711,13 +700,9 @@ window.addEventListener('message', function (event) {
         if (message.success) {
             var added = appendPiModelsToDropdown(message.models || []);
             if (piStatusEl) {
-                var cloudModels = (message.models || []).filter(function(m) { return m.subscription; }).length;
-                var localModels = (message.models || []).filter(function(m) { return !m.subscription; }).length;
+                var piModels = (message.models || []).filter(function(m) { return m.compatible; }).length;
                 var warning = message.warning ? ' Config warning: ' + message.warning : '';
-                var counts = [];
-                if (localModels > 0) { counts.push(localModels + ' local'); }
-                if (cloudModels > 0) { counts.push(cloudModels + ' cloud'); }
-                piStatusEl.textContent = '✓ Loaded ' + counts.join(' + ') + ' Pi model' + ((localModels + cloudModels) === 1 ? '' : 's') + '. Cloud models require auth via Pi.' + (added ? '' : ' Already loaded.') + warning;
+                piStatusEl.textContent = '✓ Loaded ' + piModels + ' configured Pi model' + (piModels === 1 ? '' : 's') + '. Credentials are managed by Pi.' + (added ? '' : ' Already loaded.') + warning;
                 piStatusEl.className = 'connection-success';
             }
         } else if (piStatusEl) {
@@ -1019,7 +1004,6 @@ function runActivity(activityKey) {
     }
 
     applySelectedModelConfiguration();
-    const baseUrl = document.getElementById('baseUrlInput').value || '';
     const model   = getSelectedModelId();
 
     vscode.postMessage({
@@ -1028,7 +1012,6 @@ function runActivity(activityKey) {
         code:         getBaseCode(),
         versionCount: getVersionCount(),
         activity:     activityKey,
-        baseUrl:      baseUrl,
         model:        model
     });
 

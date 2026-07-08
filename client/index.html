@@ -15,16 +15,13 @@
     </h2>
 
     <div style="margin:6px 0; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-        <label>LM Studio URL:
-            <input id="baseUrlInput" type="text" size="40" placeholder="localhost:1234/v1">
-        </label>
-        <label>Model:
+        <label>Pi model:
             <select id="modelInput" style="min-width:320px;">
-                <option value="">Loading models…</option>
+                <option value="">Load Pi models…</option>
             </select>
         </label>
-        <button id="btnTestConnection" title="Test connection to LM Studio" aria-label="Test connection to LM Studio">Test Connection</button>
-        <button id="btnLoadPiModels" title="Load compatible local models from Pi's model registry">Load Pi Models</button>
+        <button id="btnTestConnection" title="Verify the selected Pi model is available" aria-label="Verify selected Pi model">Test Pi Model</button>
+        <button id="btnLoadPiModels" title="Load models from Pi's model registry">Load Pi Models</button>
         <span id="connectionTestStatus" aria-live="polite"></span>
         <span id="piModelsStatus" aria-live="polite"></span>
     </div>
@@ -45,7 +42,7 @@
         <div class="issue-detail-panel">
             <div class="issue-detail-header">
                 <h3 id="selectedIssueTitle">Select an issue</h3>
-                <button id="btnAnalyzeRepoForFix" disabled title="Clone/read the repository, gather code context, and ask the selected local model for a fix specification">Agentic Analyze Repo for Fix</button>
+                <button id="btnAnalyzeRepoForFix" disabled title="Clone/read the repository and gather static code context for the selected issue">Analyze Repo for Fix</button>
             </div>
             <div id="selectedIssueMeta" class="issue-meta"></div>
             <pre id="selectedIssueBody" class="issue-body">Collect issues, then select one to view its description.</pre>

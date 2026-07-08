@@ -26,8 +26,8 @@ import { analyzeCodeWithLizardServer } from './lizard-server';
 import { Branch, CodeNode, LizardMetrics, createGraphFromBranch, importBonsaiPayload, trimBranchAtNode } from './bonsai-state';
 import { analyzeRepoForIssue, writeFixSpecFile, RepoIssueAnalysis } from './repo-analyzer';
 import { discoverPiModels } from './pi-models';
-import { generateViaSubscription } from './pi-subscription-rpc';
-import { buildLmStudioUrl, formatGitHubIssues, GitHubIssueForDisplay, mimeType, parseGitHubUrl } from './server-utils';
+import { generateViaSubscription, promptViaPiModel } from './pi-subscription-rpc';
+import { formatGitHubIssues, GitHubIssueForDisplay, mimeType, parseGitHubUrl } from './server-utils';
 
 // ---------------------------------------------------------------------------
 // Types  (mirrors extension.ts)
@@ -41,8 +41,7 @@ let branches: Branch[] = [];
 let activeBranchId: string | null = null;
 let currentId = 0;
 let selectedNodeId: number | null = null;
-let baseUrl: string = process.env.BONSAI_LM_URL ?? 'localhost:1234/v1';
-let LLMmodel: string = process.env.BONSAI_LM_MODEL ?? 'deepseek/deepseek-r1-0528-qwen3-8b';
+let LLMmodel: string = process.env.BONSAI_PI_MODEL ?? '';
 let availableModels: string[] = [];
 let bonsaiLogs: string[] = [];
 
@@ -58,6 +57,24 @@ function bonsaiLog(...args: any[]) {
 }
 
 function getBonsaiLogs(): string[] { return bonsaiLogs; }
+
+interface SelectedPiModel {
+  provider: string;
+  modelId: string;
+}
+
+function parseSelectedPiModel(value: string): SelectedPiModel | null {
+  const match = typeof value === 'string' ? value.match(/^pi:([^:]+):(.+)$/) : null;
+  return match ? { provider: match[1], modelId: match[2] } : null;
+}
+
+function requireSelectedPiModel(value = LLMmodel): SelectedPiModel {
+  const selected = parseSelectedPiModel(value);
+  if (!selected) {
+    throw new Error('Select a Pi model first. Click "Load Pi Models" and choose a configured Pi model.');
+  }
+  return selected;
+}
 
 // ---------------------------------------------------------------------------
 // Server-Sent Events (SSE) broadcast
@@ -77,108 +94,8 @@ function broadcast(message: object): void {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// LLM – fetchFromLocalLMStudio  (mirrors extension.ts)
+// LLM execution is Pi-only. BonsAIDE never calls local model endpoints directly.
 // ---------------------------------------------------------------------------
-
-async function fetchFromLocalLMStudio(
-  prompt: string,
-  code: string
-): Promise<{ content: string; reasoning: string; tokens: { prompt: number; completion: number; total: number } }> {
-  const systemPrompt = `
-You are a code-generation assistant. You MUST return output using ONLY the two XML tags below, with nothing before or after them. Absolutely NO markdown, NO backticks, NO prose outside the tags.
-
-### REQUIRED SCHEMA (use exactly these tags and order):
-<code>
-[ONLY the final code here — no comments, no prose]
-</code>
-<reasoning>
-[ONLY the explanation here — plain text, no code fences]
-</reasoning>
-
-### RULES (strict):
-1) Output MUST start with "<code>" on the first line and end with "</reasoning>" on the last line.
-2) No additional tags, headers, or text outside the two blocks.
-3) Put ALL executable or final code inside <code>. Do NOT include explanations, comments, or markdown there.
-4) Put ALL explanation inside <reasoning>. Do NOT include code fences or pseudo-tags there.
-5) Do NOT wrap anything in triple backticks.
-6) If unsure, still produce both tags (they may be empty), but NEVER add anything else.
-
-### GOOD EXAMPLE
-<code>
-print("Hello world")
-</code>
-<reasoning>
-This prints "Hello world" in Python.
-</reasoning>
-
-### BAD EXAMPLES (DO NOT DO):
-- \`\`\`python ...\`\`\`
-- Any text before <code> or after </reasoning>
-- Mixing code and explanation inside the same tag
-
-Validate your output against the RULES before responding.
-  `.trim();
-
-  const fullPrompt = `${prompt}\n${code}`;
-  const BASE_URL = baseUrl || 'localhost:1234/v1';
-  const MODEL = LLMmodel || 'deepseek/deepseek-r1-0528-qwen3-8b';
-  const API_KEY = 'lm-studio';
-
-  async function requestLLM(): Promise<{ response: string; usage?: any }> {
-    const res = await fetch(buildLmStudioUrl(BASE_URL, 'chat/completions'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `User prompt:\n${fullPrompt}` },
-        ],
-        temperature: 0.8,
-        stream: false,
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
-    }
-
-    const json: any = await res.json();
-    const output: string =
-      json?.choices?.[0]?.message?.content?.trim?.() ??
-      json?.choices?.[0]?.text?.trim?.() ?? '';
-    return { response: output, usage: json?.usage };
-  }
-
-  while (true) {
-    try {
-      const data = await requestLLM();
-      const output = data.response;
-      const codeMatch = output.match(/<code>([\s\S]*?)<\/code>/i);
-      const reasoningMatch = output.match(/<reasoning>([\s\S]*?)<\/reasoning>/i);
-      const content = codeMatch?.[1]?.trim() ?? '';
-      const reasoning = reasoningMatch?.[1]?.trim() ?? '(no reasoning provided)';
-
-      if (content || reasoning) {
-        const usage = data.usage;
-        const promptTokens = usage?.prompt_tokens ?? 0;
-        const completionTokens =
-          usage?.completion_tokens ?? output.split(/\s+/).filter(Boolean).length;
-        const totalTokens = usage?.total_tokens ?? promptTokens + completionTokens;
-        return { content, reasoning, tokens: { prompt: promptTokens, completion: completionTokens, total: totalTokens } };
-      } else {
-        console.warn('No <code>/<reasoning> tags found in LLM response. Retrying...');
-      }
-    } catch (err) {
-      console.warn('Error during LLM fetch/parsing:', (err as Error).message, 'Retrying...');
-    }
-    await new Promise(res => setTimeout(res, 1000));
-  }
-}
 
 // ---------------------------------------------------------------------------
 // LLM – processAgentMdWithLLM (processes Agent.md content to generate code)
@@ -187,7 +104,8 @@ Validate your output against the RULES before responding.
 async function processAgentMdWithLLM(
   agentMdContent: string
 ): Promise<{ content: string; reasoning: string }> {
-  const systemPrompt = `
+  const selected = requireSelectedPiModel();
+  const prompt = `
 You are an expert code generation assistant. You will be given an Agent.md file that describes a task or specification.
 Your job is to analyze the Agent.md content and generate the appropriate source code that implements the described task.
 
@@ -209,61 +127,29 @@ You MUST return output using ONLY the two XML tags below, with nothing before or
 5) Do NOT wrap anything in triple backticks.
 6) Generate complete, working code that implements the specification from the Agent.md file.
 
-Validate your output against the RULES before responding.
+Agent.md specification:
+${agentMdContent}
   `.trim();
 
-  const BASE_URL = baseUrl || 'localhost:1234/v1';
-  const MODEL = LLMmodel || 'deepseek/deepseek-r1-0528-qwen3-8b';
-  const API_KEY = 'lm-studio';
-
-  async function requestLLM(): Promise<{ response: string; usage?: any }> {
-    const res = await fetch(buildLmStudioUrl(BASE_URL, 'chat/completions'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Generate source code based on this Agent.md specification:\n\n${agentMdContent}` },
-        ],
-        temperature: 0.7,
-        stream: false,
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
-    }
-
-    const json: any = await res.json();
-    const output: string =
-      json?.choices?.[0]?.message?.content?.trim?.() ??
-      json?.choices?.[0]?.text?.trim?.() ?? '';
-    return { response: output, usage: json?.usage };
-  }
-
-  // Try up to 3 times to get a valid response
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const data = await requestLLM();
-      const output = data.response;
+      const result = await promptViaPiModel({
+        provider: selected.provider,
+        modelId: selected.modelId,
+        prompt,
+        timeoutMs: 300000
+      });
+      const output = result.text;
       const codeMatch = output.match(/<code>([\s\S]*?)<\/code>/i);
       const reasoningMatch = output.match(/<reasoning>([\s\S]*?)<\/reasoning>/i);
       const content = codeMatch?.[1]?.trim() ?? '';
       const reasoning = reasoningMatch?.[1]?.trim() ?? '(no reasoning provided)';
 
-      if (content) {
-        return { content, reasoning };
-      } else {
-        console.warn('No <code> block found in LLM response. Retrying...');
-      }
+      if (content) { return { content, reasoning }; }
+      console.warn('No <code> block found in Pi model response. Retrying...');
     } catch (err) {
-      console.warn('Error during Agent.md processing:', (err as Error).message);
-      if (attempt === 2) throw err; // Re-throw on last attempt
+      console.warn('Error during Agent.md processing via Pi:', (err as Error).message);
+      if (attempt === 2) { throw err; }
     }
     await new Promise(res => setTimeout(res, 1000));
   }
@@ -378,6 +264,7 @@ async function fetchGitHubRepoContent(owner: string, repo: string): Promise<stri
 
 /** Fetch open GitHub issues and format them for display in the UI. */
 async function generateAgenticFixAnalysis(analysis: RepoIssueAnalysis): Promise<string> {
+  const selected = requireSelectedPiModel();
   const snippetContext = analysis.snippets.map((snippet, index) => [
     `Snippet ${index + 1}: ${snippet.file}:${snippet.startLine}-${snippet.endLine}`,
     `Reason: ${snippet.reason}`,
@@ -386,7 +273,7 @@ async function generateAgenticFixAnalysis(analysis: RepoIssueAnalysis): Promise<
     '```'
   ].join('\n')).join('\n\n');
 
-  const systemPrompt = `
+  const prompt = `
 You are a senior software-maintenance agent. Given a GitHub issue and statically gathered repository snippets, draft a practical fix specification.
 Return concise Markdown with exactly these sections:
 ## Root-cause hypothesis
@@ -395,9 +282,7 @@ Return concise Markdown with exactly these sections:
 ## Test plan
 ## Risks and checks
 Do not claim you executed the repository. Do not invent files beyond the provided context unless clearly marked as unknown.
-  `.trim();
 
-  const userPrompt = `
 Repository: ${analysis.owner}/${analysis.repo}
 Issue: #${analysis.issue.number} ${analysis.issue.title}
 URL: ${analysis.issue.html_url || '(none)'}
@@ -412,37 +297,55 @@ Statically gathered snippets:
 ${snippetContext || '(No matching snippets found.)'}
   `.trim();
 
-  const res = await fetch(buildLmStudioUrl(baseUrl, 'chat/completions'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer lm-studio',
-    },
-    body: JSON.stringify({
-      model: LLMmodel,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.2,
-      stream: false,
-    }),
-    signal: AbortSignal.timeout(120000),
+  const result = await promptViaPiModel({
+    provider: selected.provider,
+    modelId: selected.modelId,
+    prompt,
+    timeoutMs: 300000
   });
+  return result.text;
+}
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Agentic LM Studio analysis failed: HTTP ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
-  }
+export function buildRepoIssueSnippetNodes(
+  analysis: Pick<RepoIssueAnalysis, 'snippets' | 'keywords' | 'specPath'>,
+  issue: GitHubIssueForDisplay,
+  repoRef: { owner: string; repo: string },
+  parentId: number | null,
+  firstNodeId: number
+): { nodes: CodeNode[]; lastNodeId: number; combinedSnippetContent: string } {
+  let nextId = firstNodeId;
+  const nodes: CodeNode[] = analysis.snippets.map((snippet, index) => ({
+    id: ++nextId,
+    prompt: `Repo issue #${issue.number} snippet ${index + 1}/${analysis.snippets.length}: ${snippet.file}:${snippet.startLine}-${snippet.endLine}`,
+    code: snippet.code,
+    parentId,
+    children: [],
+    durationMs: 0,
+    tokens: { prompt: 0, completion: 0, total: 0 },
+    reasoning: [
+      `Repository: ${repoRef.owner}/${repoRef.repo}`,
+      `Issue: #${issue.number} ${issue.title}`,
+      `Snippet: ${snippet.file}:${snippet.startLine}-${snippet.endLine}`,
+      `Score: ${snippet.score}`,
+      `Reason: ${snippet.reason}`,
+      `Keywords: ${analysis.keywords.join(', ') || '(none)'}`,
+      `Fix specification file: ${analysis.specPath ?? 'not written'}`,
+      'This node contains one statically gathered impacted snippet. No repository code was executed.'
+    ].join('\n'),
+    lizard: undefined,
+    isLeaf: true,
+    activity: 'repo_issue_analysis'
+  }));
 
-  const json: any = await res.json();
-  const output: string =
-    json?.choices?.[0]?.message?.content?.trim?.() ??
-    json?.choices?.[0]?.text?.trim?.() ?? '';
-  if (!output) {
-    throw new Error('Agentic LM Studio analysis returned an empty response.');
-  }
-  return output;
+  const combinedSnippetContent = analysis.snippets.map((snippet, index) => [
+    `Snippet ${index + 1}: ${snippet.file}:${snippet.startLine}-${snippet.endLine}`,
+    `Reason: ${snippet.reason}`,
+    '```',
+    snippet.code,
+    '```'
+  ].join('\n')).join('\n\n');
+
+  return { nodes, lastNodeId: nextId, combinedSnippetContent };
 }
 
 async function fetchGitHubIssues(owner: string, repo: string): Promise<{ text: string; issues: GitHubIssueForDisplay[] }> {
@@ -492,7 +395,8 @@ async function fetchGitHubIssues(owner: string, repo: string): Promise<{ text: s
 async function generateAgentMdFromRepo(
   repoContent: string
 ): Promise<{ content: string; reasoning: string }> {
-  const systemPrompt = `
+  const selected = requireSelectedPiModel();
+  const prompt = `
 You are an expert technical writer and software architect. You will be given information about a GitHub repository including its structure, metadata, and key file contents.
 
 Your job is to generate a comprehensive AGENTS.MD file that summarizes the repository. The AGENTS.MD should help developers and AI agents quickly understand the codebase.
@@ -509,16 +413,16 @@ You MUST return output using ONLY the two XML tags below, with nothing before or
 
 ### AGENTS.MD CONTENT GUIDELINES:
 The generated AGENTS.MD should include these sections (adapt based on what's relevant):
-1) **Repository Overview** – Brief description of what the project does
-2) **Environment Setup** – How to install dependencies and set up the development environment
-3) **Build & Run** – Commands to build, run, and test the project
-4) **Architecture** – High-level description of the codebase structure and key modules
-5) **Key Files & Directories** – Table mapping paths to their purposes
-6) **Code Conventions** – Naming patterns, style guidelines, important patterns used
-7) **Testing** – How tests are organized and run
-8) **Dependencies** – Key runtime and development dependencies
-9) **Configuration** – Environment variables, config files, and their purpose
-10) **Security Notes** – Any security-relevant information
+1) Repository Overview
+2) Environment Setup
+3) Build & Run
+4) Architecture
+5) Key Files & Directories
+6) Code Conventions
+7) Testing
+8) Dependencies
+9) Configuration
+10) Security Notes
 
 ### RULES (strict):
 1) Output MUST start with "<code>" on the first line and end with "</reasoning>" on the last line.
@@ -528,60 +432,29 @@ The generated AGENTS.MD should include these sections (adapt based on what's rel
 5) Do NOT wrap anything in triple backticks outside the tags.
 6) Be thorough but concise. Focus on actionable information that helps someone work with the codebase.
 
-Validate your output against the RULES before responding.
+Repository information:
+${repoContent}
   `.trim();
-
-  const BASE_URL = baseUrl || 'localhost:1234/v1';
-  const MODEL = LLMmodel || 'deepseek/deepseek-r1-0528-qwen3-8b';
-  const API_KEY = 'lm-studio';
-
-  async function requestLLM(): Promise<{ response: string; usage?: any }> {
-    const res = await fetch(buildLmStudioUrl(BASE_URL, 'chat/completions'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Analyze this GitHub repository and generate a comprehensive AGENTS.MD file:\n\n${repoContent}` },
-        ],
-        temperature: 0.7,
-        stream: false,
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
-    }
-
-    const json: any = await res.json();
-    const output: string =
-      json?.choices?.[0]?.message?.content?.trim?.() ??
-      json?.choices?.[0]?.text?.trim?.() ?? '';
-    return { response: output, usage: json?.usage };
-  }
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const data = await requestLLM();
-      const output = data.response;
+      const result = await promptViaPiModel({
+        provider: selected.provider,
+        modelId: selected.modelId,
+        prompt,
+        timeoutMs: 300000
+      });
+      const output = result.text;
       const codeMatch = output.match(/<code>([\s\S]*?)<\/code>/i);
       const reasoningMatch = output.match(/<reasoning>([\s\S]*?)<\/reasoning>/i);
       const content = codeMatch?.[1]?.trim() ?? '';
       const reasoning = reasoningMatch?.[1]?.trim() ?? '(no reasoning provided)';
 
-      if (content) {
-        return { content, reasoning };
-      } else {
-        console.warn('No <code> block found in LLM response. Retrying...');
-      }
+      if (content) { return { content, reasoning }; }
+      console.warn('No <code> block found in Pi model response. Retrying...');
     } catch (err) {
-      console.warn('Error during AGENTS.MD generation:', (err as Error).message);
-      if (attempt === 2) throw err;
+      console.warn('Error during AGENTS.MD generation via Pi:', (err as Error).message);
+      if (attempt === 2) { throw err; }
     }
     await new Promise(res => setTimeout(res, 1000));
   }
@@ -656,7 +529,7 @@ async function handleMessage(message: any): Promise<void> {
       const activeBranch = branches.find(b => b.id === activeBranchId) ?? branches[0];
       broadcast({ command: 'renderGraph', graph: createGraphFromBranch(activeBranch) });
       broadcast({ command: 'historyUpdate', history: activeBranch?.nodes ?? [] });
-      broadcast({ command: 'urlmodelUpdate', baseUrl, LLMmodel, availableModels });
+      broadcast({ command: 'urlmodelUpdate', LLMmodel, availableModels });
 
       const firstCode = activeBranch?.nodes?.[0]?.code ?? '// Imported Bonsai';
       broadcast({ command: 'setInitialCode', code: firstCode });
@@ -705,7 +578,6 @@ async function handleMessage(message: any): Promise<void> {
   if (message.command === 'generate') {
     const selectedNodeIdForPrompt = selectedNodeId;
     let code: string = message.code;
-    baseUrl = message.baseUrl || baseUrl;
     LLMmodel = message.model || LLMmodel;
 
     if (selectedNodeIdForPrompt == null) {
@@ -721,9 +593,7 @@ async function handleMessage(message: any): Promise<void> {
 
       bonsaiLog('Generating branches from #', selectedNodeIdForPrompt, 'num branches:', versionCount);
 
-      // Check if this is a subscription model (format: pi:provider:modelId)
-      const isSubscriptionModel = typeof LLMmodel === 'string' && LLMmodel.startsWith('pi:');
-      const subscriptionMatch = isSubscriptionModel ? LLMmodel.match(/^pi:([^:]+):(.+)$/) : null;
+      const selectedPiModel = requireSelectedPiModel();
 
       for (let i = 0; i < versionCount; i++) {
         const currentCount = i + 1;
@@ -735,25 +605,16 @@ async function handleMessage(message: any): Promise<void> {
         let reasoning: string;
         let tokens: { prompt: number; completion: number; total: number };
 
-        if (subscriptionMatch) {
-          const provider = subscriptionMatch[1];
-          const modelId = subscriptionMatch[2];
-          bonsaiLog(`Generating via Pi subscription model: ${provider}/${modelId}`);
-          const subscriptionResult = await generateViaSubscription({
-            provider,
-            modelId,
-            prompt: message.prompt,
-            code
-          });
-          result = subscriptionResult.content;
-          reasoning = subscriptionResult.reasoning;
-          tokens = subscriptionResult.tokens;
-        } else {
-          const localResult = await fetchFromLocalLMStudio(message.prompt, code);
-          result = localResult.content;
-          reasoning = localResult.reasoning;
-          tokens = localResult.tokens;
-        }
+        bonsaiLog(`Generating via Pi model: ${selectedPiModel.provider}/${selectedPiModel.modelId}`);
+        const subscriptionResult = await generateViaSubscription({
+          provider: selectedPiModel.provider,
+          modelId: selectedPiModel.modelId,
+          prompt: message.prompt,
+          code
+        });
+        result = subscriptionResult.content;
+        reasoning = subscriptionResult.reasoning;
+        tokens = subscriptionResult.tokens;
 
         const duration = performance.now() - start;
 
@@ -799,9 +660,8 @@ async function handleMessage(message: any): Promise<void> {
   }
 
   if (message.command === 'updateConfig') {
-    if (message.baseUrl) { baseUrl = message.baseUrl; }
     if (message.model) { LLMmodel = message.model; }
-    bonsaiLog('Config updated – baseUrl:', baseUrl, 'model:', LLMmodel);
+    bonsaiLog('Config updated – Pi model:', LLMmodel || '(none selected)');
     return;
   }
 
@@ -809,13 +669,20 @@ async function handleMessage(message: any): Promise<void> {
     bonsaiLog('Loading Pi model registry metadata');
     try {
       const result = await discoverPiModels();
-      bonsaiLog('Pi model registry loaded. Compatible:', result.compatibleCount, 'Total:', result.totalCount);
+      availableModels = result.models
+        .filter(model => model.compatible)
+        .map(model => `pi:${model.provider}:${model.id}`);
+      if ((!LLMmodel || !availableModels.includes(LLMmodel)) && availableModels.length > 0) {
+        LLMmodel = availableModels[0];
+      }
+      bonsaiLog('Pi model registry loaded. Compatible:', result.compatibleCount, 'Total:', result.totalCount, 'selected:', LLMmodel || '(none)');
       broadcast({
         command: 'piModelsUpdate',
         success: true,
         models: result.models,
         compatibleCount: result.compatibleCount,
         totalCount: result.totalCount,
+        selectedModel: LLMmodel,
         warning: result.warning ? 'Pi models.json had a load warning; check Pi config locally.' : undefined
       });
     } catch (err: any) {
@@ -826,86 +693,48 @@ async function handleMessage(message: any): Promise<void> {
   }
 
   if (message.command === 'testConnection') {
-    const testUrl = message.baseUrl || baseUrl;
-    const testModel = message.model || LLMmodel;
-    bonsaiLog('Testing connection to:', testUrl, 'with model:', testModel);
-    broadcast({ command: 'loading', text: 'Testing connection...' });
+    LLMmodel = message.model || LLMmodel;
+    bonsaiLog('Testing Pi model selection:', LLMmodel || '(none)');
+    broadcast({ command: 'loading', text: 'Testing Pi model configuration...' });
 
     try {
-      // First, test basic connectivity using the /models endpoint (lightweight, no model execution)
-      const modelsRes = await fetch(buildLmStudioUrl(testUrl, 'models'), {
-        method: 'GET',
-        headers: {
-          'Authorization': 'Bearer lm-studio',
-        },
-      });
-
-      if (!modelsRes.ok) {
-        const text = await modelsRes.text().catch(() => '');
-        throw new Error(`Server not reachable: HTTP ${modelsRes.status} ${modelsRes.statusText}${text ? ` - ${text}` : ''}`);
+      const selected = requireSelectedPiModel();
+      const result = await discoverPiModels();
+      availableModels = result.models
+        .filter(model => model.compatible)
+        .map(model => `pi:${model.provider}:${model.id}`);
+      const selectedValue = `pi:${selected.provider}:${selected.modelId}`;
+      const selectedModel = result.models.find(model => model.provider === selected.provider && model.id === selected.modelId);
+      if (!selectedModel) {
+        throw new Error(`Selected Pi model is not available: ${selected.provider}/${selected.modelId}`);
       }
-
-      const modelsJson: any = await modelsRes.json();
-      availableModels = modelsJson?.data?.map((m: any) => m.id) ?? [];
-      
-      // Check if the specified model is available
-      let modelStatus: string;
-      let selectedModel = testModel;
-      if (availableModels.length === 0) {
-        modelStatus = `Warning: No models reported by server. Make sure "${testModel}" is loaded.`;
-      } else if (availableModels.includes(testModel)) {
-        modelStatus = `Model "${testModel}" is available.`;
-      } else {
-        selectedModel = availableModels[0];
-        LLMmodel = selectedModel;
-        modelStatus = `Warning: Model "${testModel}" not found. Selected "${selectedModel}". Available: ${availableModels.join(', ')}`;
+      if (!selectedModel.compatible) {
+        throw new Error(selectedModel.reason);
       }
-
-      bonsaiLog('Connection test successful. Server reachable.', modelStatus);
-      broadcast({ 
-        command: 'connectionTestResult', 
-        success: true, 
-        message: `✓ Connected to LLM server! ${modelStatus}`,
+      LLMmodel = selectedValue;
+      bonsaiLog('Pi model test successful:', selectedValue);
+      broadcast({
+        command: 'connectionTestResult',
+        success: true,
+        message: `✓ Pi model ready: ${selected.provider}/${selected.modelId}`,
         availableModels,
-        selectedModel
+        selectedModel: selectedValue
       });
     } catch (err: any) {
-      bonsaiLog('Connection test failed:', err?.message || err);
-      broadcast({ command: 'connectionTestResult', success: false, message: `✗ Connection failed: ${err?.message || err}` });
+      bonsaiLog('Pi model test failed:', err?.message || err);
+      broadcast({ command: 'connectionTestResult', success: false, message: `✗ Pi model unavailable: ${err?.message || err}` });
     }
     return;
   }
 
   if (message.command === 'processAgentMd') {
     const agentMdContent = message.content || '';
-    baseUrl = message.baseUrl || baseUrl;
     LLMmodel = message.model || LLMmodel;
 
-    bonsaiLog('Processing Agent.md content, length:', agentMdContent.length);
-    broadcast({ command: 'loading', text: 'Verifying LLM connection...' });
+    bonsaiLog('Processing Agent.md content via Pi, length:', agentMdContent.length, 'model:', LLMmodel || '(none)');
+    broadcast({ command: 'loading', text: 'Processing Agent.md with Pi...' });
 
     try {
-      // First, verify LLM connection before processing
-      bonsaiLog('Verifying LLM connection before processing Agent.md');
-      const modelsRes = await fetch(buildLmStudioUrl(baseUrl, 'models'), {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer lm-studio'
-        },
-        signal: AbortSignal.timeout(5000)
-      });
-
-      if (!modelsRes.ok) {
-        throw new Error(`LLM server returned ${modelsRes.status}: ${modelsRes.statusText}`);
-      }
-
-      const modelsData: any = await modelsRes.json();
-      availableModels = modelsData?.data?.map((m: any) => m.id) ?? [];
-      bonsaiLog('Connection verified. Available models:', availableModels.length);
-
-      // Now process Agent.md
-      broadcast({ command: 'loading', text: 'Processing Agent.md...' });
       const { content: generatedCode, reasoning } = await processAgentMdWithLLM(agentMdContent);
       bonsaiLog('Agent.md processed successfully. Generated code length:', generatedCode.length);
       broadcast({
@@ -963,10 +792,9 @@ async function handleMessage(message: any): Promise<void> {
   if (message.command === 'analyzeRepoForFix') {
     const repoUrl = message.repoUrl || '';
     const issue = message.issue as GitHubIssueForDisplay | undefined;
-    baseUrl = message.baseUrl || baseUrl;
     LLMmodel = message.model || LLMmodel;
 
-    bonsaiLog('Agentically analyzing repo for fix:', repoUrl, issue?.number, 'model:', LLMmodel);
+    bonsaiLog('Analyzing repo for fix:', repoUrl, issue?.number, 'Pi model:', LLMmodel || '(none)');
     broadcast({ command: 'repoIssueAnalysisResult', success: false, loading: true, message: 'Preparing repository analysis...' });
 
     try {
@@ -997,23 +825,9 @@ async function handleMessage(message: any): Promise<void> {
       broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Finding impacted snippets', status: 'running' });
       broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${analysis.snippets.length} snippet(s) found` });
 
-      // Step 5: Sending to LLM
+      // Step 5: Creating one Bonsai node per impacted snippet
       stepIndex++;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Sending to LLM for analysis', status: 'running', detail: `Model: ${LLMmodel}` });
-      analysis.agenticAnalysis = await generateAgenticFixAnalysis(analysis);
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed' });
-
-      // Step 6: Writing fix specification
-      stepIndex++;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Writing fix specification file', status: 'running' });
-      analysis.specPath = await writeFixSpecFile(analysis);
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: analysis.specPath });
-      
-      analysis.content = `${analysis.content.replace(/\n\nFix specification file:\n[\s\S]*$/, '')}\n\nAgentic fix analysis:\n${analysis.agenticAnalysis}\n\nFix specification file:\n${analysis.specPath}`;
-
-      // Step 7: Creating Bonsai node
-      stepIndex++;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Creating Bonsai node', status: 'running' });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Creating snippet nodes', status: 'running' });
       
       let branch = branches.find(b => b.id === activeBranchId);
       if (!branch) {
@@ -1025,38 +839,34 @@ async function handleMessage(message: any): Promise<void> {
       const parent = parentId == null ? undefined : branch.nodes.find(n => n.id === parentId);
       if (parent) { parent.isLeaf = false; }
 
-      const newNode: CodeNode = {
-        id: ++currentId,
-        prompt: `Agentic repo issue analysis for #${issue.number}: ${issue.title}`,
-        code: analysis.content,
-        parentId,
-        children: [],
-        durationMs: 0,
-        tokens: { prompt: 0, completion: 0, total: 0 },
-        reasoning: `Cloned/read ${parsed.owner}/${parsed.repo}, gathered static code context, used local LM Studio model ${LLMmodel} for agentic fix analysis, and wrote a fix specification file at ${analysis.specPath ?? 'unknown path'}. No repository code was executed.`,
-        isLeaf: true,
-        activity: 'repo_agentic_analysis'
-      };
+      const snippetNodeResult = buildRepoIssueSnippetNodes(analysis, issue, parsed, parentId, currentId);
+      const snippetNodes = snippetNodeResult.nodes;
 
-      branch.nodes.push(newNode);
-      selectedNodeId = newNode.id;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `Node #${newNode.id}` });
+      if (snippetNodes.length === 0) {
+        throw new Error('No impacted snippets found for the selected issue.');
+      }
+
+      currentId = snippetNodeResult.lastNodeId;
+      branch.nodes.push(...snippetNodes);
+      selectedNodeId = snippetNodes[snippetNodes.length - 1].id;
+      const snippetNodeIds = snippetNodes.map(node => `#${node.id}`).join(', ');
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${snippetNodes.length} node(s): ${snippetNodeIds}` });
 
       broadcast({ command: 'historyUpdate', history: branch.nodes });
       broadcast({ command: 'renderGraph', graph: createGraphFromBranch(branch) });
-      broadcast({ command: 'setInitialCode', code: analysis.content });
+      broadcast({ command: 'setInitialCode', code: snippetNodeResult.combinedSnippetContent });
       broadcast({
         command: 'repoIssueAnalysisResult',
         success: true,
         loading: false,
-        message: `Created agentic analysis node #${newNode.id} with ${analysis.snippets.length} impacted snippet(s).`,
-        node: newNode,
+        message: `Created ${snippetNodes.length} snippet node(s) for issue #${issue.number}.`,
+        nodes: snippetNodes,
         snippets: analysis.snippets,
         keywords: analysis.keywords,
         repoPath: analysis.repoPath,
         specPath: analysis.specPath
       });
-      bonsaiLog('Agentic repo issue analysis node created:', newNode.id, 'snippets:', analysis.snippets.length);
+      bonsaiLog('Repo issue snippet nodes created:', snippetNodes.map(node => node.id).join(','), 'snippets:', analysis.snippets.length);
     } catch (err: any) {
       bonsaiLog('Repo issue analysis failed:', err?.message || err);
       broadcast({ command: 'analysisLogStep', action: 'error', detail: err?.message || 'Unknown error' });
@@ -1161,7 +971,7 @@ export function createServer(): http.Server {
         const send = (msg: object) => res.write(`data: ${JSON.stringify(msg)}\n\n`);
         send({ command: 'renderGraph', graph: createGraphFromBranch(activeBranch) });
         send({ command: 'historyUpdate', history: activeBranch.nodes });
-        send({ command: 'urlmodelUpdate', baseUrl, LLMmodel, availableModels });
+        send({ command: 'urlmodelUpdate', LLMmodel, availableModels });
         const lastCode =
           activeBranch.nodes[activeBranch.nodes.length - 1]?.code ??
           activeBranch.nodes[0]?.code ?? '// Bonsai';
@@ -1253,44 +1063,25 @@ export function startServer(port = parseInt(process.argv[2] ?? process.env.PORT 
     console.log(`BonsAIDE web server running at http://localhost:${port}`);
     console.log(`Open http://localhost:${port} in your browser to start.`);
 
-    // Auto-test LLM connection on startup
+    // Load Pi model metadata on startup. No local LLM endpoint is contacted.
     void (async () => {
       try {
-        const testUrl = baseUrl || 'localhost:1234/v1';
-        const testModel = LLMmodel || 'deepseek/deepseek-r1-0528-qwen3-8b';
-        bonsaiLog('Auto-testing LLM connection on startup:', testUrl, 'model:', testModel);
-
-        const modelsRes = await fetch(buildLmStudioUrl(testUrl, 'models'), {
-          method: 'GET',
-          headers: { 'Authorization': 'Bearer lm-studio' },
-          signal: AbortSignal.timeout(5000)
-        });
-
-        if (!modelsRes.ok) {
-          broadcast({ command: 'connectionTestResult', success: false, message: `✗ LLM server not reachable (HTTP ${modelsRes.status})` });
-          return;
+        bonsaiLog('Loading Pi model registry on startup');
+        const result = await discoverPiModels();
+        availableModels = result.models
+          .filter(model => model.compatible)
+          .map(model => `pi:${model.provider}:${model.id}`);
+        if ((!LLMmodel || !availableModels.includes(LLMmodel)) && availableModels.length > 0) {
+          LLMmodel = availableModels[0];
         }
-
-        const modelsJson: any = await modelsRes.json();
-        availableModels = modelsJson?.data?.map((m: any) => m.id) ?? [];
-
-        let modelStatus: string;
-        let selectedModel = testModel;
-        if (availableModels.length === 0) {
-          modelStatus = `Warning: No models reported by server. Make sure "${testModel}" is loaded.`;
-        } else if (availableModels.includes(testModel)) {
-          modelStatus = `Model "${testModel}" is available.`;
-        } else {
-          selectedModel = availableModels[0];
-          LLMmodel = selectedModel;
-          modelStatus = `Warning: Model "${testModel}" not found. Selected "${selectedModel}". Available: ${availableModels.join(', ')}`;
-        }
-
-        bonsaiLog('Startup connection test successful.', modelStatus);
-        broadcast({ command: 'connectionTestResult', success: true, message: `✓ Connected to LLM server! ${modelStatus}`, availableModels, selectedModel });
+        const message = availableModels.length
+          ? `✓ Pi models loaded. Selected ${LLMmodel}.`
+          : 'No configured Pi models found. Run pi /login <provider> and click Load Pi Models.';
+        bonsaiLog('Pi model registry loaded on startup. Compatible:', availableModels.length, 'selected:', LLMmodel || '(none)');
+        broadcast({ command: 'connectionTestResult', success: availableModels.length > 0, message, availableModels, selectedModel: LLMmodel });
       } catch (err: any) {
-        bonsaiLog('Startup connection test failed:', err?.message || err);
-        broadcast({ command: 'connectionTestResult', success: false, message: `✗ LLM server not reachable: ${err?.message || err}` });
+        bonsaiLog('Startup Pi model registry load failed:', err?.message || err);
+        broadcast({ command: 'connectionTestResult', success: false, message: `✗ Pi model registry unavailable: ${err?.message || err}` });
       }
     })();
   });

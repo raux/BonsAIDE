@@ -259,7 +259,7 @@ export function formatFixSpecification(analysis: RepoIssueAnalysis): string {
   lines.push('- The repository was cloned or fast-forward updated into the local repo cache.');
   lines.push('- No repository code was executed. No dependencies were installed.');
   lines.push('- Relevant snippets were gathered with static keyword search as context.');
-  lines.push('- A local LM Studio model reviewed the issue and snippets to draft the root-cause hypothesis, fix specification, and test plan.');
+  lines.push('- A Pi-selected model can review the issue and snippets to draft a root-cause hypothesis, fix specification, and test plan when agentic analysis is attached.');
   lines.push('');
   lines.push('## Extracted context keywords');
   lines.push(analysis.keywords.length ? analysis.keywords.join(', ') : '(none)');
