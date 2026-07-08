@@ -107,14 +107,28 @@ document.getElementById('btnImportJson').addEventListener('click', function () {
 });
 
 document.getElementById('btnTestConnection').addEventListener('click', function () {
+    applySelectedModelConfiguration();
     const baseUrl = document.getElementById('baseUrlInput').value || '';
-    const model = document.getElementById('modelInput').value || '';
+    const model = getSelectedModelId();
     const statusEl = document.getElementById('connectionTestStatus');
     if (statusEl) {
         statusEl.textContent = 'Testing...';
         statusEl.className = 'connection-testing';
     }
     vscode.postMessage({ command: 'testConnection', baseUrl: baseUrl, model: model });
+});
+
+document.getElementById('btnLoadPiModels').addEventListener('click', function () {
+    const statusEl = document.getElementById('piModelsStatus');
+    if (statusEl) {
+        statusEl.textContent = 'Loading Pi models...';
+        statusEl.className = 'connection-testing';
+    }
+    vscode.postMessage({ command: 'loadPiModels' });
+});
+
+document.getElementById('modelInput').addEventListener('change', function () {
+    applySelectedModelConfiguration();
 });
 
 // Collect GitHub issues button handler
@@ -156,12 +170,13 @@ document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', functi
         statusEl.className = 'issue-analysis-status processing';
     }
 
+    applySelectedModelConfiguration();
     vscode.postMessage({
         command: 'analyzeRepoForFix',
         repoUrl: repoUrl,
         issue: issue,
         baseUrl: document.getElementById('baseUrlInput').value || '',
-        model: document.getElementById('modelInput').value || ''
+        model: getSelectedModelId()
     });
 });
 
@@ -200,6 +215,7 @@ function updateModelDropdown(availableModels, selectedModel) {
             var option = document.createElement('option');
             option.value = modelId;
             option.textContent = modelId;
+            option.setAttribute('data-model-id', modelId);
             modelInput.appendChild(option);
         });
 
@@ -214,6 +230,73 @@ function updateModelDropdown(availableModels, selectedModel) {
     option.textContent = 'No models available';
     modelInput.appendChild(option);
     modelInput.disabled = true;
+}
+
+function selectedModelOption() {
+    var modelInput = document.getElementById('modelInput');
+    if (!modelInput || modelInput.selectedIndex < 0) { return null; }
+    return modelInput.options[modelInput.selectedIndex] || null;
+}
+
+function getSelectedModelId() {
+    var option = selectedModelOption();
+    if (option) {
+        return option.getAttribute('data-model-id') || option.value || '';
+    }
+    var modelInput = document.getElementById('modelInput');
+    return modelInput ? (modelInput.value || '') : '';
+}
+
+function applySelectedModelConfiguration() {
+    var option = selectedModelOption();
+    if (!option) { return; }
+
+    var baseUrl = option.getAttribute('data-base-url');
+    var baseUrlInput = document.getElementById('baseUrlInput');
+    if (baseUrl && baseUrlInput) {
+        baseUrlInput.value = baseUrl;
+    }
+}
+
+function appendPiModelsToDropdown(models) {
+    var modelInput = document.getElementById('modelInput');
+    if (!modelInput || !Array.isArray(models)) { return 0; }
+
+    var firstCompatibleValue = '';
+    var added = 0;
+    models.forEach(function (model) {
+        if (!model || !model.id || !model.provider) { return; }
+
+        var optionValue = 'pi:' + model.provider + ':' + model.id;
+        var exists = Array.prototype.some.call(modelInput.options, function (option) {
+            return option.value === optionValue;
+        });
+        if (exists) { return; }
+
+        var option = document.createElement('option');
+        option.value = optionValue;
+        option.textContent = '[Pi] ' + model.providerName + ' / ' + model.id + (model.compatible ? '' : ' (not supported)');
+        option.title = model.reason || '';
+        option.disabled = !model.compatible;
+        option.setAttribute('data-source', 'pi');
+        option.setAttribute('data-model-id', model.id);
+        if (model.baseUrl) {
+            option.setAttribute('data-base-url', model.baseUrl);
+        }
+        modelInput.appendChild(option);
+        added += 1;
+
+        if (model.compatible && !firstCompatibleValue) {
+            firstCompatibleValue = optionValue;
+        }
+    });
+
+    if (firstCompatibleValue) {
+        modelInput.disabled = false;
+        modelInput.value = firstCompatibleValue;
+        applySelectedModelConfiguration();
+    }
+    return added;
 }
 
 /* =============================================================
@@ -526,6 +609,21 @@ window.addEventListener('message', function (event) {
         }
     }
 
+    if (message.command === 'piModelsUpdate') {
+        var piStatusEl = document.getElementById('piModelsStatus');
+        if (message.success) {
+            var added = appendPiModelsToDropdown(message.models || []);
+            if (piStatusEl) {
+                var warning = message.warning ? ' Config warning: ' + message.warning : '';
+                piStatusEl.textContent = '✓ Loaded ' + message.compatibleCount + ' compatible Pi model' + (message.compatibleCount === 1 ? '' : 's') + ' (' + message.totalCount + ' available).' + (added ? '' : ' Already loaded.') + warning;
+                piStatusEl.className = 'connection-success';
+            }
+        } else if (piStatusEl) {
+            piStatusEl.textContent = '✗ ' + (message.message || 'Unable to load Pi models');
+            piStatusEl.className = 'connection-error';
+        }
+    }
+
     if (message.command === 'collectGitHubIssuesResult') {
         var issuesStatusEl = document.getElementById('collectIssuesStatus');
         var issuesTextarea = document.getElementById('collectedIssues');
@@ -808,8 +906,9 @@ function runActivity(activityKey) {
         return;
     }
 
+    applySelectedModelConfiguration();
     const baseUrl = document.getElementById('baseUrlInput').value || '';
-    const model   = document.getElementById('modelInput').value   || '';
+    const model   = getSelectedModelId();
 
     vscode.postMessage({
         command:      'generate',

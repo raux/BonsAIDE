@@ -25,6 +25,7 @@ import { computeLeafSimilaritiesForCode, SimilarityBranch, SimilarityNode } from
 import { analyzeCodeWithLizardServer } from './lizard-server';
 import { Branch, CodeNode, LizardMetrics, createGraphFromBranch, importBonsaiPayload, trimBranchAtNode } from './bonsai-state';
 import { analyzeRepoForIssue, writeFixSpecFile, RepoIssueAnalysis } from './repo-analyzer';
+import { discoverPiModels } from './pi-models';
 import { buildLmStudioUrl, formatGitHubIssues, GitHubIssueForDisplay, mimeType, parseGitHubUrl } from './server-utils';
 
 // ---------------------------------------------------------------------------
@@ -773,6 +774,26 @@ async function handleMessage(message: any): Promise<void> {
     if (message.baseUrl) { baseUrl = message.baseUrl; }
     if (message.model) { LLMmodel = message.model; }
     bonsaiLog('Config updated – baseUrl:', baseUrl, 'model:', LLMmodel);
+    return;
+  }
+
+  if (message.command === 'loadPiModels') {
+    bonsaiLog('Loading Pi model registry metadata');
+    try {
+      const result = await discoverPiModels();
+      bonsaiLog('Pi model registry loaded. Compatible:', result.compatibleCount, 'Total:', result.totalCount);
+      broadcast({
+        command: 'piModelsUpdate',
+        success: true,
+        models: result.models,
+        compatibleCount: result.compatibleCount,
+        totalCount: result.totalCount,
+        warning: result.warning ? 'Pi models.json had a load warning; check Pi config locally.' : undefined
+      });
+    } catch (err: any) {
+      bonsaiLog('Pi model registry load failed:', err?.message || err);
+      broadcast({ command: 'piModelsUpdate', success: false, message: err?.message || 'Unable to load Pi models' });
+    }
     return;
   }
 

@@ -56,6 +56,12 @@ Set your LM Studio model before launching:
 
 Both values can also be configured interactively in the Bonsai UI.
 
+### Pi model registry integration
+
+If you use [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent), click **Load Pi Models** in the Bonsai UI to list available models from Pi's model registry. BonsAIDE only enables local `openai-completions` endpoints such as LM Studio, Ollama, or vLLM because the current BonsAIDE execution path uses `/chat/completions` with a local placeholder bearer token.
+
+BonsAIDE does **not** copy Pi API keys, auth files, headers, or command-resolved secrets into this repository or the browser. Non-local/cloud Pi models are shown as unsupported until BonsAIDE has a Pi-backed execution path.
+
 ---
 
 ## Quick Use
