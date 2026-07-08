@@ -1,0 +1,154 @@
+[
+  {
+    "id": "MUT-SIM-001",
+    "description": "Reverse similarity sort order",
+    "file": "src/similarity.ts",
+    "old": "results.sort((a, b) => b.similarity - a.similarity);",
+    "new": "results.sort((a, b) => a.similarity - b.similarity);",
+    "expected": "similarity ranking test should fail"
+  },
+  {
+    "id": "MUT-SIM-002",
+    "description": "Include non-leaf nodes in similarity comparisons",
+    "file": "src/similarity.ts",
+    "old": "const leafs = branch.nodes.filter(n => n.isLeaf && typeof n.code === 'string');",
+    "new": "const leafs = branch.nodes.filter(n => typeof n.code === 'string');",
+    "expected": "non-leaf filtering test should fail"
+  },
+  {
+    "id": "MUT-SIM-003",
+    "description": "Include target node in similarity results",
+    "file": "src/similarity.ts",
+    "old": "const ordered = [target, ...leafs.filter(n => n.id !== target.id)];",
+    "new": "const ordered = [target, ...leafs];",
+    "expected": "target exclusion test should fail"
+  },
+  {
+    "id": "MUT-SIM-004",
+    "description": "Make code tokenization case-sensitive",
+    "file": "src/similarity.ts",
+    "old": "return (text || '')\n    .toLowerCase()\n    .split(/[^a-zA-Z0-9_]+/g)",
+    "new": "return (text || '')\n    .split(/[^a-zA-Z0-9_]+/g)",
+    "expected": "case-insensitive tokenization test should fail"
+  },
+  {
+    "id": "MUT-UTIL-001",
+    "description": "Return wrong color for refactor activity",
+    "file": "src/server-utils.ts",
+    "old": "case 'refactor':            return '#006d18';",
+    "new": "case 'refactor':            return '#ff0000';",
+    "expected": "activity color test should fail"
+  },
+  {
+    "id": "MUT-UTIL-002",
+    "description": "Stop stripping .git from GitHub URL repositories",
+    "file": "src/server-utils.ts",
+    "old": "/^(?:https?:\\/\\/)?(?:www\\.)?github\\.com\\/([^/\\s?#]+)\\/([^/\\s?#]+?)(?:\\.git)?(?:[/?#].*)?$/i",
+    "new": "/^(?:https?:\\/\\/)?(?:www\\.)?github\\.com\\/([^/\\s?#]+)\\/([^/\\s?#]+?)(?:[/?#].*)?$/i",
+    "expected": ".git parsing test should fail"
+  },
+  {
+    "id": "MUT-UTIL-003",
+    "description": "Reject owner/repo shorthand",
+    "file": "src/server-utils.ts",
+    "old": "const shorthandMatch = trimmed.match(/^([^/\\s?#]+)\\/([^/\\s?#]+?)(?:\\.git)?$/);",
+    "new": "const shorthandMatch = null;",
+    "expected": "GitHub shorthand test should fail"
+  },
+  {
+    "id": "MUT-UTIL-004",
+    "description": "Break absolute http(s) LM Studio URL handling",
+    "file": "src/server-utils.ts",
+    "old": "const candidate = /^https?:\\/\\//i.test(trimmed) ? trimmed : `http://${trimmed}`;",
+    "new": "const candidate = `http://${trimmed}`;",
+    "expected": "absolute URL normalization test should fail"
+  },
+  {
+    "id": "MUT-UTIL-005",
+    "description": "Stop removing trailing slash from LM Studio base URL",
+    "file": "src/server-utils.ts",
+    "old": "return normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;",
+    "new": "return normalized;",
+    "expected": "URL normalization/build URL test should fail"
+  },
+  {
+    "id": "MUT-STATE-001",
+    "description": "Mark every node as a leaf",
+    "file": "src/bonsai-state.ts",
+    "old": "n.isLeaf = (childCount.get(n.id) || 0) === 0;",
+    "new": "n.isLeaf = true;",
+    "expected": "leaf recomputation test should fail"
+  },
+  {
+    "id": "MUT-STATE-002",
+    "description": "Trim only selected node and not descendants",
+    "file": "src/bonsai-state.ts",
+    "old": "collect(root.id);\n  return toDelete;",
+    "new": "return toDelete;",
+    "expected": "subtree trim test should fail"
+  },
+  {
+    "id": "MUT-STATE-003",
+    "description": "Do not recompute leaves after trim",
+    "file": "src/bonsai-state.ts",
+    "old": "branch.nodes = branch.nodes.filter(n => !toDelete.has(n.id));\n  recomputeLeafFlags(branch);\n  return toDelete;",
+    "new": "branch.nodes = branch.nodes.filter(n => !toDelete.has(n.id));\n  return toDelete;",
+    "expected": "trim leaf-flag test should fail"
+  },
+  {
+    "id": "MUT-STATE-004",
+    "description": "Accept invalid import schema",
+    "file": "src/bonsai-state.ts",
+    "old": "if (!payload || payload.schema !== 'bonsai.v1') {",
+    "new": "if (!payload || false) {",
+    "expected": "import schema validation test should fail"
+  },
+  {
+    "id": "MUT-STATE-005",
+    "description": "Do not update currentId to max imported node id",
+    "file": "src/bonsai-state.ts",
+    "old": "const currentId = allNodeIds.length ? Math.max(...allNodeIds) : 0;",
+    "new": "const currentId = 0;",
+    "expected": "import currentId test should fail"
+  },
+  {
+    "id": "MUT-SERVER-001",
+    "description": "Remove static path traversal protection",
+    "file": "src/server.ts",
+    "old": "if (!filePath.startsWith(resolvedClientDir + path.sep) && filePath !== resolvedClientDir) {\n        res.writeHead(403);\n        res.end('Forbidden');\n        return;\n      }",
+    "new": "if (false) {\n        res.writeHead(403);\n        res.end('Forbidden');\n        return;\n      }",
+    "expected": "path traversal integration test should fail"
+  },
+  {
+    "id": "MUT-SERVER-002",
+    "description": "Make unknown routes return 200 instead of 404",
+    "file": "src/server.ts",
+    "old": "    // -----------------------------------------------------------------------\n    // 404 fallback\n    // -----------------------------------------------------------------------\n    res.writeHead(404);\n    res.end('Not found');",
+    "new": "    // -----------------------------------------------------------------------\n    // 404 fallback\n    // -----------------------------------------------------------------------\n    res.writeHead(200);\n    res.end('Not found');",
+    "expected": "unknown route integration test should fail"
+  },
+  {
+    "id": "MUT-SERVER-003",
+    "description": "Make invalid /message JSON return 204 instead of 400",
+    "file": "src/server.ts",
+    "old": "      } catch {\n        res.writeHead(400, { 'Content-Type': 'application/json' });\n        res.end(JSON.stringify({ error: 'Invalid JSON body' }));\n      }\n      return;\n    }\n\n    // -----------------------------------------------------------------------\n    // GET /export",
+    "new": "      } catch {\n        res.writeHead(204);\n        res.end();\n      }\n      return;\n    }\n\n    // -----------------------------------------------------------------------\n    // GET /export",
+    "expected": "invalid JSON integration test should fail"
+  },
+  {
+    "id": "MUT-SERVER-004",
+    "description": "Allow export of initial-only sessions",
+    "file": "src/server.ts",
+    "old": "if (!activeBranch || activeBranch.nodes.length <= 1) {",
+    "new": "if (!activeBranch || false) {",
+    "expected": "initial-only export rejection test should fail"
+  },
+  {
+    "id": "MUT-SERVER-005",
+    "description": "Serve JavaScript files as CSS",
+    "file": "src/server-utils.ts",
+    "old": "case '.js':   return 'application/javascript; charset=utf-8';",
+    "new": "case '.js':   return 'text/css; charset=utf-8';",
+    "expected": "static asset MIME type test should fail"
+  }
+]

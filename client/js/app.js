@@ -65,56 +65,6 @@ fileInput.addEventListener('change', function () {
     fileInput.value = ''; // reset so same file can be re-imported
 });
 
-// Hidden file input for Agent.md upload
-const agentMdInput = document.createElement('input');
-agentMdInput.type = 'file';
-agentMdInput.accept = '.md,.markdown';
-agentMdInput.style.display = 'none';
-document.body.appendChild(agentMdInput);
-
-agentMdInput.addEventListener('change', function () {
-    const file = agentMdInput.files && agentMdInput.files[0];
-    if (!file) { return; }
-    const reader = new FileReader();
-    reader.onload = function (ev) {
-        const agentMdEl = document.getElementById('agentMdContent');
-        if (agentMdEl) { agentMdEl.value = ev.target.result; }
-        const nameEl = document.getElementById('agentMdFilename');
-        if (nameEl) { nameEl.textContent = file.name; }
-    };
-    reader.readAsText(file);
-    agentMdInput.value = ''; // reset so same file can be re-loaded
-});
-
-document.getElementById('btnLoadAgentMd').addEventListener('click', function () {
-    agentMdInput.click();
-});
-
-// Process Agent.md button handler
-document.getElementById('btnProcessAgentMd').addEventListener('click', function () {
-    var agentMdContent = document.getElementById('agentMdContent').value || '';
-    var statusEl = document.getElementById('agentMdProcessStatus');
-    if (!agentMdContent.trim()) {
-        if (statusEl) {
-            statusEl.textContent = 'Please enter or load Agent.md content first.';
-            statusEl.className = 'error';
-        }
-        return;
-    }
-    if (statusEl) {
-        statusEl.textContent = 'Processing...';
-        statusEl.className = 'processing';
-    }
-    var baseUrl = document.getElementById('baseUrlInput').value || '';
-    var model = document.getElementById('modelInput').value || '';
-    vscode.postMessage({ 
-        command: 'processAgentMd', 
-        content: agentMdContent,
-        baseUrl: baseUrl,
-        model: model
-    });
-});
-
 /** Send a command object to the backend */
 function sendToServer(msg) {
     fetch('/message', {
@@ -167,10 +117,10 @@ document.getElementById('btnTestConnection').addEventListener('click', function 
     vscode.postMessage({ command: 'testConnection', baseUrl: baseUrl, model: model });
 });
 
-// Generate AGENTS.MD button handler
-document.getElementById('btnGenerateAgentMd').addEventListener('click', function () {
+// Collect GitHub issues button handler
+document.getElementById('btnCollectIssues').addEventListener('click', function () {
     var repoUrl = document.getElementById('githubRepoUrl').value || '';
-    var statusEl = document.getElementById('generateAgentMdStatus');
+    var statusEl = document.getElementById('collectIssuesStatus');
     if (!repoUrl.trim()) {
         if (statusEl) {
             statusEl.textContent = 'Please enter a GitHub repository URL.';
@@ -179,16 +129,39 @@ document.getElementById('btnGenerateAgentMd').addEventListener('click', function
         return;
     }
     if (statusEl) {
-        statusEl.textContent = 'Generating...';
+        statusEl.textContent = 'Collecting issues...';
         statusEl.className = 'processing';
     }
-    var baseUrl = document.getElementById('baseUrlInput').value || '';
-    var model = document.getElementById('modelInput').value || '';
     vscode.postMessage({
-        command: 'generateAgentMd',
+        command: 'collectGitHubIssues',
+        repoUrl: repoUrl
+    });
+});
+
+document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', function () {
+    var repoUrl = document.getElementById('githubRepoUrl').value || '';
+    var issue = currentSelectedIssue();
+    var statusEl = document.getElementById('repoAnalysisStatus');
+
+    if (!repoUrl.trim() || !issue) {
+        if (statusEl) {
+            statusEl.textContent = 'Select a repository and issue first.';
+            statusEl.className = 'issue-analysis-status error';
+        }
+        return;
+    }
+
+    if (statusEl) {
+        statusEl.textContent = 'Running agentic repository analysis with the selected local model...';
+        statusEl.className = 'issue-analysis-status processing';
+    }
+
+    vscode.postMessage({
+        command: 'analyzeRepoForFix',
         repoUrl: repoUrl,
-        baseUrl: baseUrl,
-        model: model
+        issue: issue,
+        baseUrl: document.getElementById('baseUrlInput').value || '',
+        model: document.getElementById('modelInput').value || ''
     });
 });
 
@@ -197,13 +170,206 @@ document.getElementById('btnGenerateAgentMd').addEventListener('click', function
    ============================================================= */
 
 function escapeHtml(s) {
-    return String(s).replace(/[<>&]/g, function (c) {
-        return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c];
+    return String(s).replace(/[<>&"']/g, function (c) {
+        return { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c];
     });
 }
 
+function ensureModelOption(selectEl, modelId) {
+    if (!selectEl || !modelId) { return; }
+    var exists = Array.prototype.some.call(selectEl.options, function (option) {
+        return option.value === modelId;
+    });
+    if (!exists) {
+        var option = document.createElement('option');
+        option.value = modelId;
+        option.textContent = modelId;
+        selectEl.appendChild(option);
+    }
+}
+
+function updateModelDropdown(availableModels, selectedModel) {
+    var modelInput = document.getElementById('modelInput');
+    if (!modelInput) { return; }
+
+    if (Array.isArray(availableModels) && availableModels.length > 0) {
+        modelInput.disabled = false;
+        modelInput.innerHTML = '';
+        availableModels.forEach(function (modelId) {
+            if (!modelId) { return; }
+            var option = document.createElement('option');
+            option.value = modelId;
+            option.textContent = modelId;
+            modelInput.appendChild(option);
+        });
+
+        var nextValue = availableModels.indexOf(selectedModel) >= 0 ? selectedModel : availableModels[0];
+        modelInput.value = nextValue;
+        return;
+    }
+
+    modelInput.innerHTML = '';
+    var option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No models available';
+    modelInput.appendChild(option);
+    modelInput.disabled = true;
+}
+
 /* =============================================================
-   4.  Similarity + metrics rendering
+   4.  GitHub issue rendering
+   ============================================================= */
+
+let collectedIssuesState = [];
+let selectedIssueIndex = -1;
+
+function currentSelectedIssue() {
+    return selectedIssueIndex >= 0 ? collectedIssuesState[selectedIssueIndex] : null;
+}
+
+function issueDescription(issue) {
+    var body = (issue && issue.body ? String(issue.body).trim() : '');
+    return body || 'No description provided.';
+}
+
+function issueLabels(issue) {
+    return (issue.labels || [])
+        .map(function (label) { return label && label.name; })
+        .filter(Boolean)
+        .join(', ');
+}
+
+function parseIssuesFromMarkdown(content) {
+    var text = String(content || '');
+    if (!text.trim() || /No open issues found\./i.test(text)) { return []; }
+
+    var issues = [];
+    var blocks = text.split(/\n(?=## #\d+: )/g);
+    blocks.forEach(function (block) {
+        var heading = block.match(/^## #(\d+):\s*(.+)$/m);
+        if (!heading) { return; }
+
+        var issue = {
+            number: Number(heading[1]),
+            title: heading[2].trim(),
+            html_url: '',
+            user: undefined,
+            labels: [],
+            comments: undefined,
+            created_at: undefined,
+            updated_at: undefined,
+            body: ''
+        };
+
+        block.split(/\r?\n/).forEach(function (line) {
+            var value;
+            if (line.indexOf('- URL: ') === 0) {
+                issue.html_url = line.slice('- URL: '.length).trim();
+            } else if (line.indexOf('- Author: @') === 0) {
+                issue.user = { login: line.slice('- Author: @'.length).trim() };
+            } else if (line.indexOf('- Labels: ') === 0) {
+                value = line.slice('- Labels: '.length).trim();
+                issue.labels = value ? value.split(/,\s*/).map(function (name) { return { name: name }; }) : [];
+            } else if (line.indexOf('- Comments: ') === 0) {
+                value = Number(line.slice('- Comments: '.length).trim());
+                if (Number.isFinite(value)) { issue.comments = value; }
+            } else if (line.indexOf('- Created: ') === 0) {
+                issue.created_at = line.slice('- Created: '.length).trim();
+            } else if (line.indexOf('- Updated: ') === 0) {
+                issue.updated_at = line.slice('- Updated: '.length).trim();
+            } else if (line.indexOf('- Summary: ') === 0) {
+                issue.body = line.slice('- Summary: '.length).trim();
+            }
+        });
+
+        issues.push(issue);
+    });
+
+    return issues;
+}
+
+function selectIssue(index) {
+    var issue = collectedIssuesState[index];
+    if (!issue) { return; }
+    selectedIssueIndex = index;
+
+    var analyzeButton = document.getElementById('btnAnalyzeRepoForFix');
+    if (analyzeButton) { analyzeButton.disabled = false; }
+
+    var listEl = document.getElementById('issuesList');
+    if (listEl) {
+        Array.prototype.forEach.call(listEl.querySelectorAll('.issue-list-item'), function (button) {
+            button.classList.toggle('selected', Number(button.getAttribute('data-index')) === index);
+        });
+    }
+
+    var titleEl = document.getElementById('selectedIssueTitle');
+    var metaEl = document.getElementById('selectedIssueMeta');
+    var bodyEl = document.getElementById('selectedIssueBody');
+    var labels = issueLabels(issue);
+
+    if (titleEl) { titleEl.textContent = '#' + issue.number + ': ' + issue.title; }
+    if (metaEl) {
+        metaEl.innerHTML = '';
+        var metaParts = [];
+        if (issue.html_url) { metaParts.push('<a href="' + escapeHtml(issue.html_url) + '" target="_blank" rel="noreferrer">Open on GitHub</a>'); }
+        if (issue.user && issue.user.login) { metaParts.push('Author: @' + escapeHtml(issue.user.login)); }
+        if (labels) { metaParts.push('Labels: ' + escapeHtml(labels)); }
+        if (typeof issue.comments === 'number') { metaParts.push('Comments: ' + issue.comments); }
+        if (issue.updated_at) { metaParts.push('Updated: ' + escapeHtml(issue.updated_at)); }
+        metaEl.innerHTML = metaParts.join(' · ');
+    }
+    if (bodyEl) { bodyEl.textContent = issueDescription(issue); }
+}
+
+function renderIssuesExplorer(issues) {
+    var explorerEl = document.getElementById('issuesExplorer');
+    var listEl = document.getElementById('issuesList');
+    var titleEl = document.getElementById('selectedIssueTitle');
+    var metaEl = document.getElementById('selectedIssueMeta');
+    var bodyEl = document.getElementById('selectedIssueBody');
+    if (!explorerEl || !listEl) { return; }
+
+    collectedIssuesState = Array.isArray(issues) ? issues : [];
+    selectedIssueIndex = -1;
+    var analyzeButton = document.getElementById('btnAnalyzeRepoForFix');
+    if (analyzeButton) { analyzeButton.disabled = true; }
+    explorerEl.style.display = 'grid';
+    listEl.innerHTML = '';
+
+    if (collectedIssuesState.length === 0) {
+        listEl.innerHTML = '<div class="empty-issues">No open issues found.</div>';
+        if (titleEl) { titleEl.textContent = 'No issues found'; }
+        if (metaEl) { metaEl.textContent = ''; }
+        if (bodyEl) { bodyEl.textContent = 'This repository has no open issues in the public GitHub issue list.'; }
+        return;
+    }
+
+    collectedIssuesState.forEach(function (issue, index) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'issue-list-item';
+        button.setAttribute('data-index', String(index));
+
+        var title = document.createElement('span');
+        title.className = 'issue-list-title';
+        title.textContent = '#' + issue.number + ' ' + issue.title;
+
+        var preview = document.createElement('span');
+        preview.className = 'issue-list-preview';
+        preview.textContent = issueDescription(issue).slice(0, 140);
+
+        button.appendChild(title);
+        button.appendChild(preview);
+        button.addEventListener('click', function () { selectIssue(index); });
+        listEl.appendChild(button);
+    });
+
+    selectIssue(0);
+}
+
+/* =============================================================
+   5.  Similarity + metrics rendering
    ============================================================= */
 
 function renderSimilarities(baseNode, similarities) {
@@ -345,9 +511,8 @@ window.addEventListener('message', function (event) {
 
     if (message.command === 'urlmodelUpdate') {
         const baseUrlInput = document.getElementById('baseUrlInput');
-        const modelInput = document.getElementById('modelInput');
         if (baseUrlInput && message.baseUrl) { baseUrlInput.value = message.baseUrl; }
-        if (modelInput && message.LLMmodel) { modelInput.value = message.LLMmodel; }
+        updateModelDropdown(message.availableModels, message.LLMmodel);
     }
 
     if (message.command === 'connectionTestResult') {
@@ -356,43 +521,49 @@ window.addEventListener('message', function (event) {
             statusEl.textContent = message.message;
             statusEl.className = message.success ? 'connection-success' : 'connection-error';
         }
+        if (message.success) {
+            updateModelDropdown(message.availableModels, message.selectedModel);
+        }
     }
 
-    if (message.command === 'agentMdProcessResult') {
-        var statusEl = document.getElementById('agentMdProcessStatus');
+    if (message.command === 'collectGitHubIssuesResult') {
+        var issuesStatusEl = document.getElementById('collectIssuesStatus');
+        var issuesTextarea = document.getElementById('collectedIssues');
         if (message.success) {
-            // Put the generated code into the code textarea
-            var codeEl = document.getElementById('code');
-            if (codeEl && message.code) { codeEl.value = message.code; }
-            if (statusEl) {
-                statusEl.textContent = '✓ Code generated successfully!';
-                statusEl.className = 'success';
+            var issues = Array.isArray(message.issues) ? message.issues : parseIssuesFromMarkdown(message.content);
+            renderIssuesExplorer(issues);
+            if (issuesTextarea && message.content) {
+                issuesTextarea.value = message.content;
+            }
+            if (issuesStatusEl) {
+                var count = typeof message.issueCount === 'number' ? message.issueCount : issues.length;
+                issuesStatusEl.textContent = '✓ Collected ' + count + ' issue' + (count === 1 ? '' : 's') + '!';
+                issuesStatusEl.className = 'success';
             }
         } else {
-            if (statusEl) {
-                statusEl.textContent = '✗ ' + (message.message || 'Processing failed');
-                statusEl.className = 'error';
+            if (issuesStatusEl) {
+                issuesStatusEl.textContent = '✗ ' + (message.message || 'Issue collection failed');
+                issuesStatusEl.className = 'error';
             }
         }
     }
 
-    if (message.command === 'generateAgentMdResult') {
-        var genStatusEl = document.getElementById('generateAgentMdStatus');
-        var genTextarea = document.getElementById('generatedAgentMd');
-        if (message.success) {
-            if (genTextarea && message.content) {
-                genTextarea.value = message.content;
-                genTextarea.style.display = 'block';
+    if (message.command === 'repoIssueAnalysisResult') {
+        var repoAnalysisStatus = document.getElementById('repoAnalysisStatus');
+        if (repoAnalysisStatus) {
+            repoAnalysisStatus.textContent = message.message || '';
+            if (message.loading) {
+                repoAnalysisStatus.className = 'issue-analysis-status processing';
+            } else {
+                repoAnalysisStatus.className = message.success ? 'issue-analysis-status success' : 'issue-analysis-status error';
             }
-            if (genStatusEl) {
-                genStatusEl.textContent = '✓ AGENTS.MD generated successfully!';
-                genStatusEl.className = 'success';
-            }
-        } else {
-            if (genStatusEl) {
-                genStatusEl.textContent = '✗ ' + (message.message || 'Generation failed');
-                genStatusEl.className = 'error';
-            }
+        }
+        if (message.success && message.specPath && repoAnalysisStatus) {
+            repoAnalysisStatus.textContent = (message.message || 'Analysis complete.') + ' Spec: ' + message.specPath;
+        }
+        if (message.success && message.node && message.node.code) {
+            var codeEl = document.getElementById('code');
+            if (codeEl) { codeEl.value = message.node.code; }
         }
     }
 
@@ -591,16 +762,6 @@ const ACTIVITY_TEMPLATES = {
             '- Avoid blanket catches; keep failures observable.\n' +
             '- Do not change external behavior except to handle errors gracefully.'
         ).trim();
-    },
-    agent_md_alternative: function (agentMdContent) {
-        return (
-            'You are an expert software engineer. You will be given CODE (from the user) and an Agent.md specification (below).\n' +
-            'Your task is to generate an ALTERNATIVE implementation based on the Agent.md specification.\n' +
-            '- Generate complete, working code that implements the specification.\n' +
-            '- Consider different approaches, design patterns, or optimization strategies.\n' +
-            '- Maintain clarity and follow best practices.\n\n' +
-            'AGENT.MD SPECIFICATION:\n' + agentMdContent
-        ).trim();
     }
 };
 
@@ -642,10 +803,6 @@ function runActivity(activityKey) {
         prompt = ACTIVITY_TEMPLATES.refactor();
     } else if (activityKey === 'exceptions') {
         prompt = ACTIVITY_TEMPLATES.exceptions();
-    } else if (activityKey === 'agent_md_alternative') {
-        const agentMdContent = (document.getElementById('agentMdContent').value || '').trim();
-        if (!agentMdContent) { console.log('Please provide Agent.md content first.'); return; }
-        prompt = ACTIVITY_TEMPLATES.agent_md_alternative(agentMdContent);
     } else {
         console.warn('Unknown activity:', activityKey);
         return;
@@ -668,7 +825,6 @@ function runActivity(activityKey) {
 }
 
 // Wire activity buttons
-document.getElementById('btnGenerateAlternatives').addEventListener('click', function () { runActivity('agent_md_alternative'); });
 document.getElementById('btnGenTests').addEventListener('click',    function () { runActivity('gen_tests'); });
 document.getElementById('btnRefactor').addEventListener('click',    function () { runActivity('refactor'); });
 document.getElementById('btnExceptions').addEventListener('click',  function () { runActivity('exceptions'); });

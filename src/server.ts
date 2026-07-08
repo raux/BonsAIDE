@@ -23,36 +23,13 @@ import * as os from 'os';
 import * as path from 'path';
 import { computeLeafSimilaritiesForCode, SimilarityBranch, SimilarityNode } from './similarity';
 import { analyzeCodeWithLizardServer } from './lizard-server';
+import { Branch, CodeNode, LizardMetrics, createGraphFromBranch, importBonsaiPayload, trimBranchAtNode } from './bonsai-state';
+import { analyzeRepoForIssue, writeFixSpecFile, RepoIssueAnalysis } from './repo-analyzer';
+import { buildLmStudioUrl, formatGitHubIssues, GitHubIssueForDisplay, mimeType, parseGitHubUrl } from './server-utils';
 
 // ---------------------------------------------------------------------------
 // Types  (mirrors extension.ts)
 // ---------------------------------------------------------------------------
-
-type LizardMetrics = any;
-
-interface CodeNode {
-  id: number;
-  prompt: string;
-  code: string;
-  parentId: number | null;
-  children: CodeNode[];
-  durationMs?: number;
-  tokens?: {
-    prompt: number;
-    completion: number;
-    total: number;
-  };
-  reasoning?: string;
-  lizard?: LizardMetrics;
-  isLeaf: boolean;
-  activity: string;
-}
-
-interface Branch {
-  id: string;
-  name: string;
-  nodes: CodeNode[];
-}
 
 // ---------------------------------------------------------------------------
 // In-memory state  (equivalent to VS Code globalState + module-level vars)
@@ -64,6 +41,7 @@ let currentId = 0;
 let selectedNodeId: number | null = null;
 let baseUrl: string = process.env.BONSAI_LM_URL ?? 'localhost:1234/v1';
 let LLMmodel: string = process.env.BONSAI_LM_MODEL ?? 'deepseek/deepseek-r1-0528-qwen3-8b';
+let availableModels: string[] = [];
 let bonsaiLogs: string[] = [];
 
 // ---------------------------------------------------------------------------
@@ -95,70 +73,6 @@ function broadcast(message: object): void {
 // ---------------------------------------------------------------------------
 // Graph / branch helpers  (mirrors extension.ts)
 // ---------------------------------------------------------------------------
-
-function getActivityColor(activity?: string): string {
-  switch (activity) {
-    case 'gen_tests':           return '#970071';
-    case 'refactor':            return '#006d18';
-    case 'exceptions':          return '#00b0b6';
-    case 'agent_md_alternative': return '#4c51bf';
-    default:                    return '#777777';
-  }
-}
-
-function createGraphFromBranch(branch?: Branch): { nodes: object[]; edges: object[] } {
-  if (!branch) { return { nodes: [], edges: [] }; }
-
-  const metricNodes = branch.nodes.filter(n => n.parentId !== null);
-  const completionVals = metricNodes.map(n => n.tokens?.completion ?? 0);
-  const minTokens = completionVals.length ? Math.min(...completionVals) : 0;
-  const maxTokens = completionVals.length ? Math.max(...completionVals) : 0;
-  const durationVals = metricNodes.map(n => n.durationMs ?? 0);
-  const minDuration = durationVals.length ? Math.min(...durationVals) : 0;
-  const maxDuration = durationVals.length ? Math.max(...durationVals) : 0;
-
-  return {
-    nodes: branch.nodes.map(s => {
-      const tokens = s.tokens?.completion ?? 0;
-      const size = (minTokens === maxTokens)
-        ? 80
-        : 40 + ((tokens - minTokens) / (maxTokens - minTokens)) * (120 - 40);
-
-      const duration = s.durationMs ?? 0;
-      const t = (maxDuration === minDuration)
-        ? 0
-        : (duration - minDuration) / (maxDuration - minDuration);
-      const r = Math.round(255 * t);
-      const b = Math.round(255 * (1 - t));
-      const timeColor = `rgb(${r},0,${b})`;
-      const activityColor = getActivityColor(s.activity);
-
-      return {
-        data: {
-          id: 'n' + s.id, label: '#' + s.id,
-          code: s.code, prompt: s.prompt, activity: s.activity, reasoning: s.reasoning,
-          size: Math.round(size), activityColor, timeColor, duration, durationNorm: t
-        }
-      };
-    }),
-    edges: branch.nodes
-      .filter(n => n.parentId !== null)
-      .map(n => ({ data: { source: 'n' + n.parentId, target: 'n' + n.id } }))
-  };
-}
-
-function recomputeLeafFlags(branch: Branch): void {
-  const childCount = new Map<number, number>();
-  for (const n of branch.nodes) { childCount.set(n.id, 0); }
-  for (const n of branch.nodes) {
-    if (n.parentId != null && childCount.has(n.parentId)) {
-      childCount.set(n.parentId, (childCount.get(n.parentId) || 0) + 1);
-    }
-  }
-  for (const n of branch.nodes) {
-    n.isLeaf = (childCount.get(n.id) || 0) === 0;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // LLM – fetchFromLocalLMStudio  (mirrors extension.ts)
@@ -209,7 +123,7 @@ Validate your output against the RULES before responding.
   const API_KEY = 'lm-studio';
 
   async function requestLLM(): Promise<{ response: string; usage?: any }> {
-    const res = await fetch(`http://${BASE_URL}/chat/completions`, {
+    const res = await fetch(buildLmStudioUrl(BASE_URL, 'chat/completions'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -301,7 +215,7 @@ Validate your output against the RULES before responding.
   const API_KEY = 'lm-studio';
 
   async function requestLLM(): Promise<{ response: string; usage?: any }> {
-    const res = await fetch(`http://${BASE_URL}/chat/completions`, {
+    const res = await fetch(buildLmStudioUrl(BASE_URL, 'chat/completions'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -358,17 +272,6 @@ Validate your output against the RULES before responding.
 // ---------------------------------------------------------------------------
 // GitHub helpers – fetch repository structure and key files
 // ---------------------------------------------------------------------------
-
-/** Parse owner and repo name from a GitHub URL */
-function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
-  const match = url.trim().match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+)|^([^/\s]+)\/([^/\s#?]+)$/);
-  if (match) {
-    const owner = match[1] || match[3];
-    const repo = (match[2] || match[4]).replace(/\.git$/, '');
-    return { owner, repo };
-  }
-  return null;
-}
 
 /** Fetch the repository tree and key file contents from GitHub API */
 async function fetchGitHubRepoContent(owner: string, repo: string): Promise<string> {
@@ -471,6 +374,115 @@ async function fetchGitHubRepoContent(owner: string, repo: string): Promise<stri
   return summary;
 }
 
+/** Fetch open GitHub issues and format them for display in the UI. */
+async function generateAgenticFixAnalysis(analysis: RepoIssueAnalysis): Promise<string> {
+  const snippetContext = analysis.snippets.map((snippet, index) => [
+    `Snippet ${index + 1}: ${snippet.file}:${snippet.startLine}-${snippet.endLine}`,
+    `Reason: ${snippet.reason}`,
+    '```',
+    snippet.code,
+    '```'
+  ].join('\n')).join('\n\n');
+
+  const systemPrompt = `
+You are a senior software-maintenance agent. Given a GitHub issue and statically gathered repository snippets, draft a practical fix specification.
+Return concise Markdown with exactly these sections:
+## Root-cause hypothesis
+## Impacted code
+## Fix specification
+## Test plan
+## Risks and checks
+Do not claim you executed the repository. Do not invent files beyond the provided context unless clearly marked as unknown.
+  `.trim();
+
+  const userPrompt = `
+Repository: ${analysis.owner}/${analysis.repo}
+Issue: #${analysis.issue.number} ${analysis.issue.title}
+URL: ${analysis.issue.html_url || '(none)'}
+
+Issue description:
+${analysis.issue.body || 'No description provided.'}
+
+Extracted keywords:
+${analysis.keywords.join(', ') || '(none)'}
+
+Statically gathered snippets:
+${snippetContext || '(No matching snippets found.)'}
+  `.trim();
+
+  const res = await fetch(buildLmStudioUrl(baseUrl, 'chat/completions'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer lm-studio',
+    },
+    body: JSON.stringify({
+      model: LLMmodel,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.2,
+      stream: false,
+    }),
+    signal: AbortSignal.timeout(120000),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Agentic LM Studio analysis failed: HTTP ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
+  }
+
+  const json: any = await res.json();
+  const output: string =
+    json?.choices?.[0]?.message?.content?.trim?.() ??
+    json?.choices?.[0]?.text?.trim?.() ?? '';
+  if (!output) {
+    throw new Error('Agentic LM Studio analysis returned an empty response.');
+  }
+  return output;
+}
+
+async function fetchGitHubIssues(owner: string, repo: string): Promise<{ text: string; issues: GitHubIssueForDisplay[] }> {
+  const headers: Record<string, string> = {
+    'Accept': 'application/vnd.github.v3+json',
+    'User-Agent': 'BonsAIDE'
+  };
+
+  const issuesRes = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?state=open&per_page=50`,
+    { headers, signal: AbortSignal.timeout(15000) }
+  );
+
+  if (!issuesRes.ok) {
+    const text = await issuesRes.text().catch(() => '');
+    throw new Error(`GitHub issues API error: ${issuesRes.status} ${issuesRes.statusText}${text ? ` - ${text}` : ''}`);
+  }
+
+  const issueData: any = await issuesRes.json();
+  if (!Array.isArray(issueData)) {
+    throw new Error('GitHub issues API returned an unexpected response.');
+  }
+
+  const issues: GitHubIssueForDisplay[] = issueData
+    .filter((item: any) => !item.pull_request)
+    .map((item: any) => ({
+      number: Number(item.number),
+      title: String(item.title ?? ''),
+      html_url: String(item.html_url ?? ''),
+      user: item.user && typeof item.user.login === 'string' ? { login: item.user.login } : undefined,
+      labels: Array.isArray(item.labels)
+        ? item.labels.map((label: any) => ({ name: typeof label.name === 'string' ? label.name : undefined }))
+        : [],
+      created_at: typeof item.created_at === 'string' ? item.created_at : undefined,
+      updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
+      comments: typeof item.comments === 'number' ? item.comments : undefined,
+      body: typeof item.body === 'string' ? item.body : undefined,
+    }));
+
+  return { text: formatGitHubIssues(owner, repo, issues), issues };
+}
+
 // ---------------------------------------------------------------------------
 // LLM – generateAgentMdFromRepo (generates AGENTS.MD from a GitHub repository)
 // ---------------------------------------------------------------------------
@@ -522,7 +534,7 @@ Validate your output against the RULES before responding.
   const API_KEY = 'lm-studio';
 
   async function requestLLM(): Promise<{ response: string; usage?: any }> {
-    const res = await fetch(`http://${BASE_URL}/chat/completions`, {
+    const res = await fetch(buildLmStudioUrl(BASE_URL, 'chat/completions'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -580,6 +592,12 @@ Validate your output against the RULES before responding.
 // ---------------------------------------------------------------------------
 
 function initFreshBonsai(): void {
+  branches = [];
+  activeBranchId = null;
+  selectedNodeId = null;
+  currentId = 0;
+  bonsaiLogs = [];
+
   const initialNode: CodeNode = {
     id: ++currentId,
     prompt: 'Initial code',
@@ -605,26 +623,15 @@ async function handleMessage(message: any): Promise<void> {
   if (message.command === 'trim') {
     const branch = branches.find(b => b.id === activeBranchId);
     if (!branch) { return; }
-    const base = branch.nodes.find(n => n.id === message.id);
-    if (!base) { return; }
+    const toDelete = trimBranchAtNode(branch, Number(message.id));
+    if (toDelete.size === 0) { return; }
 
-    const toDelete = new Set<number>([base.id]);
-    const collect = (node: CodeNode) => {
-      for (const child of branch.nodes.filter(n => n.parentId === node.id)) {
-        toDelete.add(child.id);
-        collect(child);
-      }
-    };
-    collect(base);
-
-    branch.nodes = branch.nodes.filter(n => !toDelete.has(n.id));
     if (selectedNodeId != null && toDelete.has(selectedNodeId)) {
       selectedNodeId = null;
       broadcast({ command: 'leafSimilarities', node: null, similarities: [] });
     }
-    recomputeLeafFlags(branch);
     broadcast({ command: 'renderGraph', graph: createGraphFromBranch(branch) });
-    bonsaiLog(`Trimmed ${toDelete.size} nodes starting from #${base.id}`);
+    bonsaiLog(`Trimmed ${toDelete.size} nodes starting from #${Number(message.id)}`);
     return;
   }
 
@@ -637,48 +644,17 @@ async function handleMessage(message: any): Promise<void> {
     // The 'content' field carries the raw text of the uploaded JSON file
     try {
       const payload = JSON.parse(message.content as string);
-      if (!payload || payload.schema !== 'bonsai.v1') {
-        throw new Error('Invalid schema. Expected "bonsai.v1".');
-      }
-      if (!Array.isArray(payload.branches)) {
-        throw new Error('Invalid file: "branches" must be an array.');
-      }
+      const importedState = importBonsaiPayload(payload);
 
-      const importedBranches: Branch[] = payload.branches.map((b: any) => ({
-        id: String(b.id ?? 'main'),
-        name: String(b.name ?? 'Main'),
-        nodes: Array.isArray(b.nodes) ? b.nodes.map((n: any) => ({
-          id: Number(n.id),
-          prompt: String(n.prompt ?? ''),
-          code: String(n.code ?? ''),
-          parentId: (n.parentId === null || n.parentId === undefined) ? null : Number(n.parentId),
-          children: [],
-          durationMs: typeof n.durationMs === 'number' ? n.durationMs : 0,
-          tokens: n.tokens ?? { prompt: 0, completion: 0, total: 0 },
-          reasoning: typeof n.reasoning === 'string' ? n.reasoning : undefined,
-          lizard: n.lizard,
-          isLeaf: Boolean(n.isLeaf),
-          activity: String(n.activity ?? 'other')
-        })) : []
-      }));
-
-      const importedActiveId: string | null =
-        (typeof payload.activeBranchId === 'string' ? payload.activeBranchId : null)
-        ?? (importedBranches[0]?.id ?? null);
-
-      for (const br of importedBranches) { recomputeLeafFlags(br); }
-
-      const allNodeIds = importedBranches.flatMap(b => b.nodes.map(n => n.id));
-      currentId = allNodeIds.length ? Math.max(...allNodeIds) : 0;
-
-      branches = importedBranches;
-      activeBranchId = importedActiveId;
+      branches = importedState.branches;
+      activeBranchId = importedState.activeBranchId;
+      currentId = importedState.currentId;
       selectedNodeId = null;
 
       const activeBranch = branches.find(b => b.id === activeBranchId) ?? branches[0];
       broadcast({ command: 'renderGraph', graph: createGraphFromBranch(activeBranch) });
       broadcast({ command: 'historyUpdate', history: activeBranch?.nodes ?? [] });
-      broadcast({ command: 'urlmodelUpdate', baseUrl, LLMmodel });
+      broadcast({ command: 'urlmodelUpdate', baseUrl, LLMmodel, availableModels });
 
       const firstCode = activeBranch?.nodes?.[0]?.code ?? '// Imported Bonsai';
       broadcast({ command: 'setInitialCode', code: firstCode });
@@ -807,13 +783,8 @@ async function handleMessage(message: any): Promise<void> {
     broadcast({ command: 'loading', text: 'Testing connection...' });
 
     try {
-      // Validate URL format (should be host:port/path pattern)
-      if (!/^[\w.-]+(:\d+)?(\/[\w./]*)?$/.test(testUrl)) {
-        throw new Error('Invalid URL format. Expected format: host:port/path (e.g., localhost:1234/v1)');
-      }
-
       // First, test basic connectivity using the /models endpoint (lightweight, no model execution)
-      const modelsRes = await fetch(`http://${testUrl}/models`, {
+      const modelsRes = await fetch(buildLmStudioUrl(testUrl, 'models'), {
         method: 'GET',
         headers: {
           'Authorization': 'Bearer lm-studio',
@@ -826,23 +797,28 @@ async function handleMessage(message: any): Promise<void> {
       }
 
       const modelsJson: any = await modelsRes.json();
-      const availableModels = modelsJson?.data?.map((m: any) => m.id) ?? [];
+      availableModels = modelsJson?.data?.map((m: any) => m.id) ?? [];
       
       // Check if the specified model is available
       let modelStatus: string;
+      let selectedModel = testModel;
       if (availableModels.length === 0) {
         modelStatus = `Warning: No models reported by server. Make sure "${testModel}" is loaded.`;
       } else if (availableModels.includes(testModel)) {
         modelStatus = `Model "${testModel}" is available.`;
       } else {
-        modelStatus = `Warning: Model "${testModel}" not found. Available: ${availableModels.join(', ')}`;
+        selectedModel = availableModels[0];
+        LLMmodel = selectedModel;
+        modelStatus = `Warning: Model "${testModel}" not found. Selected "${selectedModel}". Available: ${availableModels.join(', ')}`;
       }
 
       bonsaiLog('Connection test successful. Server reachable.', modelStatus);
       broadcast({ 
         command: 'connectionTestResult', 
         success: true, 
-        message: `✓ Connected to LLM server! ${modelStatus}` 
+        message: `✓ Connected to LLM server! ${modelStatus}`,
+        availableModels,
+        selectedModel
       });
     } catch (err: any) {
       bonsaiLog('Connection test failed:', err?.message || err);
@@ -862,11 +838,7 @@ async function handleMessage(message: any): Promise<void> {
     try {
       // First, verify LLM connection before processing
       bonsaiLog('Verifying LLM connection before processing Agent.md');
-      if (!/^[\w.-]+(:\d+)?(\/[\w./]*)?$/.test(baseUrl)) {
-        throw new Error('Invalid URL format. Expected format: host:port/path (e.g., localhost:1234/v1)');
-      }
-
-      const modelsRes = await fetch(`http://${baseUrl}/models`, {
+      const modelsRes = await fetch(buildLmStudioUrl(baseUrl, 'models'), {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -880,7 +852,7 @@ async function handleMessage(message: any): Promise<void> {
       }
 
       const modelsData: any = await modelsRes.json();
-      const availableModels = modelsData?.data?.map((m: any) => m.id) ?? [];
+      availableModels = modelsData?.data?.map((m: any) => m.id) ?? [];
       bonsaiLog('Connection verified. Available models:', availableModels.length);
 
       // Now process Agent.md
@@ -904,12 +876,10 @@ async function handleMessage(message: any): Promise<void> {
     return;
   }
 
-  if (message.command === 'generateAgentMd') {
+  if (message.command === 'collectGitHubIssues') {
     const repoUrl = message.repoUrl || '';
-    baseUrl = message.baseUrl || baseUrl;
-    LLMmodel = message.model || LLMmodel;
 
-    bonsaiLog('Generating AGENTS.MD for repo:', repoUrl);
+    bonsaiLog('Collecting GitHub issues for repo:', repoUrl);
     broadcast({ command: 'loading', text: 'Parsing GitHub repository URL...' });
 
     try {
@@ -918,42 +888,103 @@ async function handleMessage(message: any): Promise<void> {
         throw new Error('Invalid GitHub URL. Expected format: https://github.com/owner/repo');
       }
 
-      // Verify LLM connection first
-      bonsaiLog('Verifying LLM connection before generating AGENTS.MD');
-      if (!/^[\w.-]+(:\d+)?(\/[\w./]*)?$/.test(baseUrl)) {
-        throw new Error('Invalid LLM URL format. Expected format: host:port/path (e.g., localhost:1234/v1)');
-      }
-      const modelsRes = await fetch(`http://${baseUrl}/models`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer lm-studio' },
-        signal: AbortSignal.timeout(5000)
-      });
-      if (!modelsRes.ok) {
-        throw new Error(`LLM server returned ${modelsRes.status}: ${modelsRes.statusText}`);
-      }
-
-      // Fetch repo content from GitHub
-      broadcast({ command: 'loading', text: 'Fetching repository from GitHub...' });
-      const repoContent = await fetchGitHubRepoContent(parsed.owner, parsed.repo);
-      bonsaiLog('Repository content fetched. Length:', repoContent.length);
-
-      // Generate AGENTS.MD via LLM
-      broadcast({ command: 'loading', text: 'Generating AGENTS.MD with LLM...' });
-      const { content: agentsMd, reasoning } = await generateAgentMdFromRepo(repoContent);
-      bonsaiLog('AGENTS.MD generated successfully. Length:', agentsMd.length);
+      broadcast({ command: 'loading', text: 'Fetching open GitHub issues...' });
+      const issueResult = await fetchGitHubIssues(parsed.owner, parsed.repo);
+      bonsaiLog('GitHub issues collected. Count:', issueResult.issues.length, 'Length:', issueResult.text.length);
 
       broadcast({
-        command: 'generateAgentMdResult',
+        command: 'collectGitHubIssuesResult',
         success: true,
-        content: agentsMd,
-        reasoning
+        content: issueResult.text,
+        issues: issueResult.issues,
+        issueCount: issueResult.issues.length,
+        repository: `${parsed.owner}/${parsed.repo}`
       });
     } catch (err: any) {
-      bonsaiLog('AGENTS.MD generation failed:', err?.message || err);
+      bonsaiLog('GitHub issue collection failed:', err?.message || err);
       broadcast({
-        command: 'generateAgentMdResult',
+        command: 'collectGitHubIssuesResult',
         success: false,
-        message: err?.message || 'Generation failed'
+        message: err?.message || 'Issue collection failed'
+      });
+    }
+    return;
+  }
+
+  if (message.command === 'analyzeRepoForFix') {
+    const repoUrl = message.repoUrl || '';
+    const issue = message.issue as GitHubIssueForDisplay | undefined;
+    baseUrl = message.baseUrl || baseUrl;
+    LLMmodel = message.model || LLMmodel;
+
+    bonsaiLog('Agentically analyzing repo for fix:', repoUrl, issue?.number, 'model:', LLMmodel);
+    broadcast({ command: 'repoIssueAnalysisResult', success: false, loading: true, message: 'Preparing repository analysis...' });
+
+    try {
+      const parsed = parseGitHubUrl(repoUrl);
+      if (!parsed) {
+        throw new Error('Invalid GitHub URL. Expected format: https://github.com/owner/repo');
+      }
+      if (!issue || typeof issue.title !== 'string' || typeof issue.number !== 'number') {
+        throw new Error('Select an issue before analyzing the repository.');
+      }
+
+      broadcast({ command: 'repoIssueAnalysisResult', success: false, loading: true, message: 'Cloning or updating repository cache and gathering code context...' });
+      const analysis = await analyzeRepoForIssue(parsed.owner, parsed.repo, issue);
+      broadcast({ command: 'repoIssueAnalysisResult', success: false, loading: true, message: `Found ${analysis.snippets.length} likely impacted snippet(s). Asking local model for agentic fix specification...` });
+      analysis.agenticAnalysis = await generateAgenticFixAnalysis(analysis);
+      analysis.specPath = await writeFixSpecFile(analysis);
+      analysis.content = `${analysis.content.replace(/\n\nFix specification file:\n[\s\S]*$/, '')}\n\nAgentic fix analysis:\n${analysis.agenticAnalysis}\n\nFix specification file:\n${analysis.specPath}`;
+      broadcast({ command: 'repoIssueAnalysisResult', success: false, loading: true, message: `Agentic analysis complete. Creating Bonsai node...` });
+
+      let branch = branches.find(b => b.id === activeBranchId);
+      if (!branch) {
+        initFreshBonsai();
+        branch = branches[0];
+      }
+
+      const parentId = selectedNodeId ?? branch.nodes[0]?.id ?? null;
+      const parent = parentId == null ? undefined : branch.nodes.find(n => n.id === parentId);
+      if (parent) { parent.isLeaf = false; }
+
+      const newNode: CodeNode = {
+        id: ++currentId,
+        prompt: `Agentic repo issue analysis for #${issue.number}: ${issue.title}`,
+        code: analysis.content,
+        parentId,
+        children: [],
+        durationMs: 0,
+        tokens: { prompt: 0, completion: 0, total: 0 },
+        reasoning: `Cloned/read ${parsed.owner}/${parsed.repo}, gathered static code context, used local LM Studio model ${LLMmodel} for agentic fix analysis, and wrote a fix specification file at ${analysis.specPath ?? 'unknown path'}. No repository code was executed.`,
+        isLeaf: true,
+        activity: 'repo_agentic_analysis'
+      };
+
+      branch.nodes.push(newNode);
+      selectedNodeId = newNode.id;
+
+      broadcast({ command: 'historyUpdate', history: branch.nodes });
+      broadcast({ command: 'renderGraph', graph: createGraphFromBranch(branch) });
+      broadcast({ command: 'setInitialCode', code: analysis.content });
+      broadcast({
+        command: 'repoIssueAnalysisResult',
+        success: true,
+        loading: false,
+        message: `Created agentic analysis node #${newNode.id} with ${analysis.snippets.length} impacted snippet(s).`,
+        node: newNode,
+        snippets: analysis.snippets,
+        keywords: analysis.keywords,
+        repoPath: analysis.repoPath,
+        specPath: analysis.specPath
+      });
+      bonsaiLog('Agentic repo issue analysis node created:', newNode.id, 'snippets:', analysis.snippets.length);
+    } catch (err: any) {
+      bonsaiLog('Repo issue analysis failed:', err?.message || err);
+      broadcast({
+        command: 'repoIssueAnalysisResult',
+        success: false,
+        loading: false,
+        message: err?.message || 'Repository analysis failed'
       });
     }
     return;
@@ -990,21 +1021,9 @@ function serveFile(res: http.ServerResponse, filePath: string, contentType: stri
 /** Root of the standalone web frontend (client/ directory) */
 const CLIENT_DIR = path.join(__dirname, '..', 'client');
 
-/** Map common file extensions to MIME types */
-function mimeType(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  switch (ext) {
-    case '.html': return 'text/html; charset=utf-8';
-    case '.css':  return 'text/css; charset=utf-8';
-    case '.js':   return 'application/javascript; charset=utf-8';
-    case '.json': return 'application/json';
-    case '.png':  return 'image/png';
-    case '.svg':  return 'image/svg+xml';
-    default:      return 'application/octet-stream';
-  }
-}
+export function createServer(): http.Server {
+  initFreshBonsai();
 
-function createServer(): http.Server {
   return http.createServer(async (req, res) => {
     const url = req.url ?? '/';
     const method = req.method ?? 'GET';
@@ -1062,7 +1081,7 @@ function createServer(): http.Server {
         const send = (msg: object) => res.write(`data: ${JSON.stringify(msg)}\n\n`);
         send({ command: 'renderGraph', graph: createGraphFromBranch(activeBranch) });
         send({ command: 'historyUpdate', history: activeBranch.nodes });
-        send({ command: 'urlmodelUpdate', baseUrl, LLMmodel });
+        send({ command: 'urlmodelUpdate', baseUrl, LLMmodel, availableModels });
         const lastCode =
           activeBranch.nodes[activeBranch.nodes.length - 1]?.code ??
           activeBranch.nodes[0]?.code ?? '// Bonsai';
@@ -1148,54 +1167,57 @@ function createServer(): http.Server {
 // Entry point
 // ---------------------------------------------------------------------------
 
-initFreshBonsai();
+export function startServer(port = parseInt(process.argv[2] ?? process.env.PORT ?? '3000', 10)): http.Server {
+  const server = createServer();
+  server.listen(port, () => {
+    console.log(`BonsAIDE web server running at http://localhost:${port}`);
+    console.log(`Open http://localhost:${port} in your browser to start.`);
 
-const PORT = parseInt(process.argv[2] ?? process.env.PORT ?? '3000', 10);
-const server = createServer();
-server.listen(PORT, () => {
-  console.log(`BonsAIDE web server running at http://localhost:${PORT}`);
-  console.log(`Open http://localhost:${PORT} in your browser to start.`);
+    // Auto-test LLM connection on startup
+    void (async () => {
+      try {
+        const testUrl = baseUrl || 'localhost:1234/v1';
+        const testModel = LLMmodel || 'deepseek/deepseek-r1-0528-qwen3-8b';
+        bonsaiLog('Auto-testing LLM connection on startup:', testUrl, 'model:', testModel);
 
-  // Auto-test LLM connection on startup
-  void (async () => {
-    try {
-      const testUrl = baseUrl || 'localhost:1234/v1';
-      const testModel = LLMmodel || 'deepseek/deepseek-r1-0528-qwen3-8b';
-      bonsaiLog('Auto-testing LLM connection on startup:', testUrl, 'model:', testModel);
+        const modelsRes = await fetch(buildLmStudioUrl(testUrl, 'models'), {
+          method: 'GET',
+          headers: { 'Authorization': 'Bearer lm-studio' },
+          signal: AbortSignal.timeout(5000)
+        });
 
-      if (!/^[\w.-]+(:\d+)?(\/[\w./]*)?$/.test(testUrl)) {
-        broadcast({ command: 'connectionTestResult', success: false, message: '✗ Invalid URL format' });
-        return;
+        if (!modelsRes.ok) {
+          broadcast({ command: 'connectionTestResult', success: false, message: `✗ LLM server not reachable (HTTP ${modelsRes.status})` });
+          return;
+        }
+
+        const modelsJson: any = await modelsRes.json();
+        availableModels = modelsJson?.data?.map((m: any) => m.id) ?? [];
+
+        let modelStatus: string;
+        let selectedModel = testModel;
+        if (availableModels.length === 0) {
+          modelStatus = `Warning: No models reported by server. Make sure "${testModel}" is loaded.`;
+        } else if (availableModels.includes(testModel)) {
+          modelStatus = `Model "${testModel}" is available.`;
+        } else {
+          selectedModel = availableModels[0];
+          LLMmodel = selectedModel;
+          modelStatus = `Warning: Model "${testModel}" not found. Selected "${selectedModel}". Available: ${availableModels.join(', ')}`;
+        }
+
+        bonsaiLog('Startup connection test successful.', modelStatus);
+        broadcast({ command: 'connectionTestResult', success: true, message: `✓ Connected to LLM server! ${modelStatus}`, availableModels, selectedModel });
+      } catch (err: any) {
+        bonsaiLog('Startup connection test failed:', err?.message || err);
+        broadcast({ command: 'connectionTestResult', success: false, message: `✗ LLM server not reachable: ${err?.message || err}` });
       }
+    })();
+  });
 
-      const modelsRes = await fetch(`http://${testUrl}/models`, {
-        method: 'GET',
-        headers: { 'Authorization': 'Bearer lm-studio' },
-        signal: AbortSignal.timeout(5000)
-      });
+  return server;
+}
 
-      if (!modelsRes.ok) {
-        broadcast({ command: 'connectionTestResult', success: false, message: `✗ LLM server not reachable (HTTP ${modelsRes.status})` });
-        return;
-      }
-
-      const modelsJson: any = await modelsRes.json();
-      const availableModels = modelsJson?.data?.map((m: any) => m.id) ?? [];
-
-      let modelStatus: string;
-      if (availableModels.length === 0) {
-        modelStatus = `Warning: No models reported by server. Make sure "${testModel}" is loaded.`;
-      } else if (availableModels.includes(testModel)) {
-        modelStatus = `Model "${testModel}" is available.`;
-      } else {
-        modelStatus = `Warning: Model "${testModel}" not found. Available: ${availableModels.join(', ')}`;
-      }
-
-      bonsaiLog('Startup connection test successful.', modelStatus);
-      broadcast({ command: 'connectionTestResult', success: true, message: `✓ Connected to LLM server! ${modelStatus}` });
-    } catch (err: any) {
-      bonsaiLog('Startup connection test failed:', err?.message || err);
-      broadcast({ command: 'connectionTestResult', success: false, message: `✗ LLM server not reachable: ${err?.message || err}` });
-    }
-  })();
-});
+if (require.main === module) {
+  startServer();
+}

@@ -10,6 +10,9 @@
   },
   "include": [
     "src/server.ts",
+    "src/bonsai-state.ts",
+    "src/repo-analyzer.ts",
+    "src/server-utils.ts",
     "src/lizard-server.ts",
     "src/similarity.ts"
   ]

@@ -4,3 +4,6 @@ out/
 out-server/
 *.vsix
 .DS_Store
+
+artifacts/
+.pi/memory/
