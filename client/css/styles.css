@@ -306,6 +306,121 @@ textarea {
 
 .swatch.repo_issue_analysis { background: #b45309; }
 
+/* ---- Fix alternatives ------------------------------------ */
+.fix-alternatives-panel {
+    grid-column: 1 / -1;
+    border: 1px solid #e0e0e0;
+    background: #fff;
+    border-radius: 8px;
+    margin-top: 12px;
+    overflow: hidden;
+}
+
+.fix-alternatives-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #fff7ed;
+    border-bottom: 1px solid #fed7aa;
+}
+
+.fix-alternatives-header h3 {
+    margin: 0;
+    font-size: 14px;
+    color: #9a3412;
+}
+
+.fix-alternatives-summary {
+    color: #9a3412;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.fix-alternatives-cards {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(220px, 1fr));
+    gap: 12px;
+    padding: 12px;
+}
+
+@media (max-width: 980px) {
+    .fix-alternatives-cards {
+        grid-template-columns: 1fr;
+    }
+}
+
+.fix-alternative-card {
+    border: 1px solid #fed7aa;
+    background: #fffbf5;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.fix-alternative-card h4 {
+    margin: 0 0 6px;
+    color: #9a3412;
+}
+
+.fix-alternative-summary {
+    margin: 0 0 10px;
+    color: #555;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.fix-todo-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.fix-todo-item {
+    border: 1px solid #f3e0c7;
+    background: #fff;
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.fix-todo-item label {
+    display: block;
+    font-weight: 700;
+    color: #333;
+}
+
+.fix-code-sketch {
+    margin: 6px 0 0;
+    padding: 6px;
+    background: #f8f9fa;
+    border: 1px solid #e5e5e5;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    max-height: 160px;
+    overflow: auto;
+}
+
+.btn-create-fix-node {
+    margin-top: 10px;
+    appearance: none;
+    border: 0;
+    border-radius: 6px;
+    padding: 7px 9px;
+    font-weight: 700;
+    color: #fff;
+    background: #b45309;
+    cursor: pointer;
+}
+
+.btn-create-fix-node:hover {
+    background: #92400e;
+}
+
 /* ---- Analysis checklist + log panels -------------------- */
 .analysis-sidecar {
     display: grid;

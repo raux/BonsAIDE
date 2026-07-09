@@ -48,6 +48,13 @@
             <pre id="selectedIssueBody" class="issue-body">Collect issues, then select one to view its description.</pre>
             <div id="repoAnalysisStatus" class="issue-analysis-status" aria-live="polite"></div>
         </div>
+        <div id="fixAlternativesPanel" class="fix-alternatives-panel" style="display:none;">
+            <div class="fix-alternatives-header">
+                <h3>Fix Alternatives</h3>
+                <span id="fixAlternativesSummary" class="fix-alternatives-summary"></span>
+            </div>
+            <div id="fixAlternativesCards" class="fix-alternatives-cards" aria-live="polite"></div>
+        </div>
         <div class="analysis-sidecar">
             <div id="analysisChecklistPanel" class="analysis-checklist-panel">
                 <div class="analysis-checklist-header">

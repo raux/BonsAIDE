@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildAgenticFixAnalysisPrompt,
+  buildFixAlternativesPrompt,
   buildIssueLocationHypothesisPrompt,
   buildRepoIssueSnippetNodes,
+  formatFixAlternativesAsMarkdown,
+  parseFixAlternatives,
   parseIssueLocationHypothesis,
 } from '../out-server/server.js';
 
@@ -47,8 +49,8 @@ test('parseIssueLocationHypothesis parses fenced model JSON defensively', () => 
   assert.deepEqual(parsed.searchSignals, ['No model loaded']);
 });
 
-test('agentic fix analysis prompt includes issue interpretation when available', () => {
-  const prompt = buildAgenticFixAnalysisPrompt({
+test('fix alternatives prompt asks for exactly three JSON todo plans', () => {
+  const prompt = buildFixAlternativesPrompt({
     owner: 'TypeWhisper',
     repo: 'typewhisper-mac',
     repoPath: '/tmp/typewhisper-mac',
@@ -67,27 +69,35 @@ test('agentic fix analysis prompt includes issue interpretation when available',
     },
   });
 
-  assert.match(prompt, /Issue interpretation:/);
+  assert.match(prompt, /propose exactly 3 alternative fix plans/);
+  assert.match(prompt, /"alternatives"/);
+  assert.match(prompt, /"bugLocation"/);
+  assert.match(prompt, /"sourceCodeSketch"/);
   assert.match(prompt, /Auto-unload restore can leave Parakeet/);
-  assert.match(prompt, /Likely files: TypeWhisper\/Services\/File1\.swift/);
 });
 
-test('agentic fix analysis prompt asks for concrete fix steps', () => {
-  const prompt = buildAgenticFixAnalysisPrompt({
-    owner: 'TypeWhisper',
-    repo: 'typewhisper-mac',
-    repoPath: '/tmp/typewhisper-mac',
-    issue: makeIssue(),
-    keywords: ['parakeet', 'restore'],
-    snippets: [makeSnippet(1)],
-    content: 'Static context gathered for agentic fix analysis',
-  });
+test('parseFixAlternatives parses JSON todo cards and formats markdown', () => {
+  const alternatives = parseFixAlternatives(JSON.stringify({
+    alternatives: [{
+      title: 'Minimal guard',
+      summary: 'Guard restore before reporting status.',
+      todos: [{
+        bugLocation: 'TypeWhisper/Services/File1.swift:10-14',
+        fixIdea: 'Check model state after restore timeout.',
+        potentialMethod: 'restoreModel',
+        sourceCodeSketch: 'if model == nil { reloadModel() }',
+        tests: ['restore timeout regression'],
+      }],
+    }],
+  }));
 
-  assert.match(prompt, /draft practical fix steps/);
-  assert.match(prompt, /## Fix steps/);
-  assert.match(prompt, /Prefer numbered, concrete steps/);
-  assert.match(prompt, /TypeWhisper\/Services\/File1\.swift:10-14/);
-  assert.match(prompt, /Do not claim you executed the repository/);
+  assert.equal(alternatives.length, 1);
+  assert.equal(alternatives[0].title, 'Minimal guard');
+  assert.equal(alternatives[0].todos[0].potentialMethod, 'restoreModel');
+  const markdown = formatFixAlternativesAsMarkdown(alternatives);
+  assert.match(markdown, /## Alternative 1: Minimal guard/);
+  assert.match(markdown, /Bug location: TypeWhisper\/Services\/File1\.swift:10-14/);
+  assert.match(markdown, /restore timeout regression/);
 });
 
 test('agentic repo analysis creates one Bonsai node per impacted snippet', () => {

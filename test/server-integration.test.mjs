@@ -60,6 +60,7 @@ test('GET / serves the browser UI', async () => {
     assert.match(res.body, /id="btnAnalyzeRepoForFix"/);
     assert.match(res.body, /id="analysisChecklist"/);
     assert.match(res.body, /id="analysisLogPanel"/);
+    assert.match(res.body, /id="fixAlternativesPanel"/);
   });
 });
 

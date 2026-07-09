@@ -191,6 +191,7 @@ document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', functi
     }
 
     analysisLogClear();
+    fixAlternativesClear();
     analysisChecklistStart();
     var modelId = getSelectedModelId();
     analysisLogSetModel(modelId);
@@ -216,10 +217,12 @@ var DEFAULT_ANALYSIS_CHECKLIST = [
     'Rephrase issue into search signals',
     'Clone/update repository',
     'Identify potential bug locations',
-    'Draft fix steps with Pi model',
-    'Create Bonsai snippet nodes'
+    'Draft 3 fix-plan alternatives',
+    'Display fix-plan todo cards'
 ];
 var analysisChecklistState = [];
+var latestFixAlternatives = [];
+var latestFixAlternativeContext = { repoUrl: '', issue: null };
 
 function analysisLogClear() {
     analysisLogState = { model: '', steps: [] };
@@ -373,6 +376,102 @@ function analysisChecklistRender() {
 
         itemEl.appendChild(bodyEl);
         listEl.appendChild(itemEl);
+    });
+}
+
+function fixAlternativesClear() {
+    latestFixAlternatives = [];
+    latestFixAlternativeContext = { repoUrl: '', issue: null };
+    var panel = document.getElementById('fixAlternativesPanel');
+    var cards = document.getElementById('fixAlternativesCards');
+    var summary = document.getElementById('fixAlternativesSummary');
+    if (panel) { panel.style.display = 'none'; }
+    if (cards) { cards.innerHTML = ''; }
+    if (summary) { summary.textContent = ''; }
+}
+
+function appendTextRow(container, label, value) {
+    if (!value) { return; }
+    var labelEl = document.createElement('label');
+    labelEl.textContent = label;
+    container.appendChild(labelEl);
+    var valueEl = document.createElement('div');
+    valueEl.textContent = value;
+    container.appendChild(valueEl);
+}
+
+function renderFixAlternatives(alternatives, context) {
+    latestFixAlternatives = Array.isArray(alternatives) ? alternatives : [];
+    latestFixAlternativeContext = context || { repoUrl: '', issue: null };
+
+    var panel = document.getElementById('fixAlternativesPanel');
+    var cards = document.getElementById('fixAlternativesCards');
+    var summary = document.getElementById('fixAlternativesSummary');
+    if (!panel || !cards) { return; }
+
+    cards.innerHTML = '';
+    if (!latestFixAlternatives.length) {
+        panel.style.display = 'none';
+        if (summary) { summary.textContent = ''; }
+        return;
+    }
+
+    panel.style.display = 'block';
+    if (summary) { summary.textContent = latestFixAlternatives.length + ' alternatives'; }
+
+    latestFixAlternatives.forEach(function (alternative, index) {
+        var card = document.createElement('section');
+        card.className = 'fix-alternative-card';
+
+        var title = document.createElement('h4');
+        title.textContent = 'Alternative ' + (index + 1) + ': ' + (alternative.title || 'Untitled fix plan');
+        card.appendChild(title);
+
+        if (alternative.summary) {
+            var summaryP = document.createElement('p');
+            summaryP.className = 'fix-alternative-summary';
+            summaryP.textContent = alternative.summary;
+            card.appendChild(summaryP);
+        }
+
+        var todoList = document.createElement('ul');
+        todoList.className = 'fix-todo-list';
+        (alternative.todos || []).forEach(function (todo) {
+            var item = document.createElement('li');
+            item.className = 'fix-todo-item';
+            appendTextRow(item, 'Bug location', todo.bugLocation);
+            appendTextRow(item, 'Fix idea', todo.fixIdea);
+            appendTextRow(item, 'Potential method', todo.potentialMethod);
+            if (todo.sourceCodeSketch) {
+                var codeLabel = document.createElement('label');
+                codeLabel.textContent = 'Potential source code';
+                item.appendChild(codeLabel);
+                var code = document.createElement('pre');
+                code.className = 'fix-code-sketch';
+                code.textContent = todo.sourceCodeSketch;
+                item.appendChild(code);
+            }
+            if (Array.isArray(todo.tests) && todo.tests.length) {
+                appendTextRow(item, 'Tests/checks', todo.tests.join('\n'));
+            }
+            todoList.appendChild(item);
+        });
+        card.appendChild(todoList);
+
+        var button = document.createElement('button');
+        button.className = 'btn-create-fix-node';
+        button.type = 'button';
+        button.textContent = 'Create Bonsai node from this plan';
+        button.addEventListener('click', function () {
+            vscode.postMessage({
+                command: 'createFixAlternativeNode',
+                repoUrl: latestFixAlternativeContext.repoUrl,
+                issue: latestFixAlternativeContext.issue,
+                alternative: alternative
+            });
+        });
+        card.appendChild(button);
+        cards.appendChild(card);
     });
 }
 
@@ -853,9 +952,23 @@ window.addEventListener('message', function (event) {
         if (message.success && message.specPath && repoAnalysisStatus) {
             repoAnalysisStatus.textContent = (message.message || 'Analysis complete.') + ' Spec: ' + message.specPath;
         }
+        if (message.success && Array.isArray(message.fixAlternatives)) {
+            renderFixAlternatives(message.fixAlternatives, {
+                repoUrl: document.getElementById('githubRepoUrl') ? document.getElementById('githubRepoUrl').value || '' : '',
+                issue: currentSelectedIssue()
+            });
+        }
         if (message.success && message.node && message.node.code) {
             var codeEl = document.getElementById('code');
             if (codeEl) { codeEl.value = message.node.code; }
+        }
+    }
+
+    if (message.command === 'createFixAlternativeNodeResult') {
+        var createStatus = document.getElementById('repoAnalysisStatus');
+        if (createStatus) {
+            createStatus.textContent = message.message || '';
+            createStatus.className = message.success ? 'issue-analysis-status success' : 'issue-analysis-status error';
         }
     }
 

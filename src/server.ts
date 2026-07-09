@@ -328,17 +328,33 @@ async function generateIssueLocationHypothesis(issue: GitHubIssueForDisplay): Pr
   return parseIssueLocationHypothesis(result.text);
 }
 
-/** Build the Pi prompt used to turn static repo snippets into concrete fix steps. */
-export function buildAgenticFixAnalysisPrompt(analysis: RepoIssueAnalysis): string {
-  const snippetContext = analysis.snippets.map((snippet, index) => [
+export interface FixTodo {
+  bugLocation: string;
+  fixIdea: string;
+  potentialMethod: string;
+  sourceCodeSketch: string;
+  tests: string[];
+}
+
+export interface FixAlternative {
+  title: string;
+  summary: string;
+  todos: FixTodo[];
+}
+
+function snippetContextForPrompt(analysis: RepoIssueAnalysis): string {
+  return analysis.snippets.map((snippet, index) => [
     `Snippet ${index + 1}: ${snippet.file}:${snippet.startLine}-${snippet.endLine}`,
     `Reason: ${snippet.reason}`,
     '```',
     snippet.code,
     '```'
   ].join('\n')).join('\n\n');
+}
+
+function issueInterpretationForPrompt(analysis: RepoIssueAnalysis): string {
   const hypothesis = analysis.locationHypothesis;
-  const issueInterpretation = hypothesis ? [
+  return hypothesis ? [
     `Rephrased issue: ${hypothesis.rephrasedIssue || '(not provided)'}`,
     `Suspected behavior: ${hypothesis.suspectedBehavior.join(', ') || '(none)'}`,
     `Likely components: ${hypothesis.likelyComponents.join(', ') || '(none)'}`,
@@ -347,22 +363,40 @@ export function buildAgenticFixAnalysisPrompt(analysis: RepoIssueAnalysis): stri
     `Search signals: ${hypothesis.searchSignals.join(', ') || '(none)'}`,
     `Negative signals: ${hypothesis.negativeSignals.join(', ') || '(none)'}`,
   ].join('\n') : '(Issue rephrasing was unavailable; fallback search signals were used.)';
+}
 
+export function buildFixAlternativesPrompt(analysis: RepoIssueAnalysis): string {
   return `
-You are a senior software-maintenance agent. Given a GitHub issue and statically gathered repository snippets, draft practical fix steps.
-Return concise Markdown with exactly these sections:
-## Root-cause hypothesis
-## Impacted code
-## Fix steps
-## Test plan
-## Risks and checks
+You are a senior software-maintenance agent. Given a GitHub issue, issue interpretation, and statically gathered repository snippets, propose exactly 3 alternative fix plans.
 
-Fix-step requirements:
-- Prefer numbered, concrete steps that a developer can execute.
-- Reference provided files and line ranges when relevant.
-- Separate code changes from tests and verification checks.
+Return ONLY valid JSON with this exact shape:
+{
+  "alternatives": [
+    {
+      "title": "short title such as Minimal localized guard",
+      "summary": "one-sentence tradeoff summary",
+      "todos": [
+        {
+          "bugLocation": "file/path:line-range and why this is likely relevant",
+          "fixIdea": "concrete change to make",
+          "potentialMethod": "function/class/method/identifier to edit or add",
+          "sourceCodeSketch": "small illustrative code sketch, patch fragment, or pseudocode",
+          "tests": ["specific regression/unit/manual check"]
+        }
+      ]
+    }
+  ]
+}
+
+Requirements:
+- Provide exactly 3 alternatives.
+- Each alternative must be a todo/checklist-style plan with 2 to 5 todos.
+- Each todo must include bugLocation, fixIdea, potentialMethod, sourceCodeSketch, and tests.
+- Prefer concrete bug locations from the provided snippets.
+- Make the alternatives meaningfully different, e.g. minimal guard, refactor/state-machine fix, defensive validation/observability fix.
 - Do not claim you executed the repository.
 - Do not invent files beyond the provided context unless clearly marked as unknown.
+- Do not include Markdown or code fences outside JSON string values.
 
 Repository: ${analysis.owner}/${analysis.repo}
 Issue: #${analysis.issue.number} ${analysis.issue.title}
@@ -372,25 +406,84 @@ Issue description:
 ${analysis.issue.body || 'No description provided.'}
 
 Issue interpretation:
-${issueInterpretation}
+${issueInterpretationForPrompt(analysis)}
 
 Context search signals:
 ${analysis.keywords.join(', ') || '(none)'}
 
-Statically gathered snippets:
-${snippetContext || '(No matching snippets found.)'}
+Potential bug-location snippets:
+${snippetContextForPrompt(analysis) || '(No matching snippets found.)'}
   `.trim();
 }
 
-async function generateAgenticFixAnalysis(analysis: RepoIssueAnalysis): Promise<string> {
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function coerceFixAlternative(value: unknown, index = 0): FixAlternative {
+  const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  const rawTodos = Array.isArray(raw.todos) ? raw.todos : [];
+  return {
+    title: stringValue(raw.title) || `Alternative ${index + 1}`,
+    summary: stringValue(raw.summary),
+    todos: rawTodos.slice(0, 8).map((todoValue): FixTodo => {
+      const todo = (todoValue && typeof todoValue === 'object' ? todoValue : {}) as Record<string, unknown>;
+      return {
+        bugLocation: stringValue(todo.bugLocation),
+        fixIdea: stringValue(todo.fixIdea),
+        potentialMethod: stringValue(todo.potentialMethod),
+        sourceCodeSketch: stringValue(todo.sourceCodeSketch),
+        tests: stringArray(todo.tests),
+      };
+    }).filter(todo => todo.bugLocation || todo.fixIdea || todo.potentialMethod || todo.sourceCodeSketch || todo.tests.length > 0),
+  };
+}
+
+export function parseFixAlternatives(raw: string): FixAlternative[] {
+  const trimmed = (raw || '').trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const candidate = fenced || trimmed.match(/\{[\s\S]*\}/)?.[0] || trimmed;
+  const parsed = JSON.parse(candidate) as Record<string, unknown>;
+  const alternatives = Array.isArray(parsed.alternatives) ? parsed.alternatives : [];
+  return alternatives.slice(0, 3).map((alternative, index) => coerceFixAlternative(alternative, index));
+}
+
+export function formatFixAlternativeAsMarkdown(alternative: FixAlternative, index = 0): string {
+  const lines: string[] = [];
+  lines.push(`## Alternative ${index + 1}: ${alternative.title}`);
+  if (alternative.summary) { lines.push('', alternative.summary); }
+  lines.push('');
+  alternative.todos.forEach((todo, todoIndex) => {
+    lines.push(`### Todo ${todoIndex + 1}`);
+    lines.push(`- [ ] Bug location: ${todo.bugLocation || '(unknown)'}`);
+    lines.push(`- [ ] Fix idea: ${todo.fixIdea || '(not specified)'}`);
+    lines.push(`- [ ] Potential method: ${todo.potentialMethod || '(not specified)'}`);
+    lines.push('- [ ] Potential source code:');
+    lines.push('```');
+    lines.push(todo.sourceCodeSketch || '// Source-code sketch not provided');
+    lines.push('```');
+    if (todo.tests.length > 0) {
+      lines.push('- [ ] Tests/checks:');
+      todo.tests.forEach(test => lines.push(`  - ${test}`));
+    }
+    lines.push('');
+  });
+  return lines.join('\n').trimEnd();
+}
+
+export function formatFixAlternativesAsMarkdown(alternatives: FixAlternative[]): string {
+  return alternatives.map((alternative, index) => formatFixAlternativeAsMarkdown(alternative, index)).join('\n\n');
+}
+
+async function generateFixAlternatives(analysis: RepoIssueAnalysis): Promise<FixAlternative[]> {
   const selected = requireSelectedPiModel();
   const result = await promptViaPiModel({
     provider: selected.provider,
     modelId: selected.modelId,
-    prompt: buildAgenticFixAnalysisPrompt(analysis),
+    prompt: buildFixAlternativesPrompt(analysis),
     timeoutMs: 300000
   });
-  return result.text;
+  return parseFixAlternatives(result.text);
 }
 
 export function buildRepoIssueSnippetNodes(
@@ -841,6 +934,55 @@ async function handleMessage(message: any): Promise<void> {
     return;
   }
 
+  if (message.command === 'createFixAlternativeNode') {
+    const alternative = coerceFixAlternative(message.alternative, 0);
+    const issue = message.issue as GitHubIssueForDisplay | undefined;
+    const repoUrl = message.repoUrl || '';
+
+    try {
+      let branch = branches.find(b => b.id === activeBranchId);
+      if (!branch) {
+        initFreshBonsai();
+        branch = branches[0];
+      }
+      const parsed = repoUrl ? parseGitHubUrl(repoUrl) : null;
+      const parentId = selectedNodeId ?? branch.nodes[0]?.id ?? null;
+      const parent = parentId == null ? undefined : branch.nodes.find(n => n.id === parentId);
+      if (parent) { parent.isLeaf = false; }
+
+      const markdown = formatFixAlternativeAsMarkdown(alternative, 0);
+      const node: CodeNode = {
+        id: ++currentId,
+        prompt: `Fix alternative: ${alternative.title}`,
+        code: markdown,
+        parentId,
+        children: [],
+        durationMs: 0,
+        tokens: { prompt: 0, completion: 0, total: 0 },
+        reasoning: [
+          parsed ? `Repository: ${parsed.owner}/${parsed.repo}` : 'Repository: unknown',
+          issue ? `Issue: #${issue.number} ${issue.title}` : 'Issue: unknown',
+          `Alternative: ${alternative.title}`,
+          'This node was created from a displayed fix-plan todo card. No repository code was executed.'
+        ].join('\n'),
+        lizard: undefined,
+        isLeaf: true,
+        activity: 'repo_issue_analysis'
+      };
+
+      branch.nodes.push(node);
+      selectedNodeId = node.id;
+      broadcast({ command: 'historyUpdate', history: branch.nodes });
+      broadcast({ command: 'renderGraph', graph: createGraphFromBranch(branch) });
+      broadcast({ command: 'setInitialCode', code: markdown });
+      broadcast({ command: 'createFixAlternativeNodeResult', success: true, message: `Created Bonsai node #${node.id} from ${alternative.title}.`, node });
+    } catch (err: any) {
+      bonsaiLog('Fix alternative node creation failed:', err?.message || err);
+      broadcast({ command: 'createFixAlternativeNodeResult', success: false, message: err?.message || 'Node creation failed' });
+    }
+    return;
+  }
+
   if (message.command === 'collectGitHubIssues') {
     const repoUrl = message.repoUrl || '';
 
@@ -934,52 +1076,37 @@ async function handleMessage(message: any): Promise<void> {
         throw new Error('No impacted snippets found for the selected issue.');
       }
 
-      // Step 5: Drafting model-assisted fix steps and updating the spec file
+      // Step 5: Drafting 3 model-assisted fix-plan alternatives and updating the spec file
       stepIndex++;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Drafting fix steps with Pi model', status: 'running' });
-      analysis.agenticAnalysis = await generateAgenticFixAnalysis(analysis);
-      analysis.specPath = await writeFixSpecFile(analysis);
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `Updated spec: ${analysis.specPath}` });
-
-      // Step 6: Creating one Bonsai node per impacted snippet
-      stepIndex++;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Creating snippet nodes', status: 'running' });
-      
-      let branch = branches.find(b => b.id === activeBranchId);
-      if (!branch) {
-        initFreshBonsai();
-        branch = branches[0];
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Drafting 3 fix-plan alternatives', status: 'running' });
+      const fixAlternatives = await generateFixAlternatives(analysis);
+      if (fixAlternatives.length === 0) {
+        throw new Error('The selected Pi model did not return any fix alternatives.');
       }
+      analysis.agenticAnalysis = formatFixAlternativesAsMarkdown(fixAlternatives);
+      analysis.specPath = await writeFixSpecFile(analysis);
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${fixAlternatives.length} alternative(s). Spec: ${analysis.specPath}` });
 
-      const parentId = selectedNodeId ?? branch.nodes[0]?.id ?? null;
-      const parent = parentId == null ? undefined : branch.nodes.find(n => n.id === parentId);
-      if (parent) { parent.isLeaf = false; }
+      // Step 6: Displaying fix-plan todo cards instead of creating snippet nodes
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Displaying fix-plan todo cards', status: 'running' });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${fixAlternatives.length} card(s) ready` });
 
-      const snippetNodeResult = buildRepoIssueSnippetNodes(analysis, issue, parsed, parentId, currentId);
-      const snippetNodes = snippetNodeResult.nodes;
-
-      currentId = snippetNodeResult.lastNodeId;
-      branch.nodes.push(...snippetNodes);
-      selectedNodeId = snippetNodes[snippetNodes.length - 1].id;
-      const snippetNodeIds = snippetNodes.map(node => `#${node.id}`).join(', ');
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${snippetNodes.length} node(s): ${snippetNodeIds}` });
-
-      broadcast({ command: 'historyUpdate', history: branch.nodes });
-      broadcast({ command: 'renderGraph', graph: createGraphFromBranch(branch) });
-      broadcast({ command: 'setInitialCode', code: snippetNodeResult.combinedSnippetContent });
+      broadcast({ command: 'setInitialCode', code: analysis.agenticAnalysis });
       broadcast({
         command: 'repoIssueAnalysisResult',
         success: true,
         loading: false,
-        message: `Created ${snippetNodes.length} snippet node(s) for issue #${issue.number}.`,
-        nodes: snippetNodes,
+        message: `Prepared ${fixAlternatives.length} fix alternative todo list(s) for issue #${issue.number}.`,
+        fixAlternatives,
         snippets: analysis.snippets,
         keywords: analysis.keywords,
         locationHypothesis: analysis.locationHypothesis,
         repoPath: analysis.repoPath,
-        specPath: analysis.specPath
+        specPath: analysis.specPath,
+        repository: `${parsed.owner}/${parsed.repo}`
       });
-      bonsaiLog('Repo issue snippet nodes created:', snippetNodes.map(node => node.id).join(','), 'snippets:', analysis.snippets.length);
+      bonsaiLog('Repo issue fix alternatives created:', fixAlternatives.length, 'snippets:', analysis.snippets.length);
     } catch (err: any) {
       bonsaiLog('Repo issue analysis failed:', err?.message || err);
       broadcast({ command: 'analysisLogStep', action: 'error', detail: err?.message || 'Unknown error' });
