@@ -306,13 +306,139 @@ textarea {
 
 .swatch.repo_issue_analysis { background: #b45309; }
 
-/* ---- Analysis log panel --------------------------------- */
+/* ---- Analysis checklist + log panels -------------------- */
+.analysis-sidecar {
+    display: grid;
+    grid-template-columns: minmax(260px, 36%) 1fr;
+    gap: 12px;
+    grid-column: 1 / -1;
+}
+
+.analysis-checklist-panel,
 .analysis-log-panel {
     border: 1px solid #e0e0e0;
     background: #f9fafb;
     border-radius: 8px;
     margin-top: 12px;
     overflow: hidden;
+}
+
+@media (max-width: 900px) {
+    .analysis-sidecar {
+        grid-template-columns: 1fr;
+    }
+}
+
+.analysis-checklist-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #f0f0f0;
+    border-bottom: 1px solid #ddd;
+}
+
+.analysis-checklist-header h3 {
+    margin: 0;
+    font-size: 14px;
+}
+
+.checklist-progress {
+    font-size: 12px;
+    font-weight: 700;
+    color: #555;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 999px;
+    padding: 2px 8px;
+    white-space: nowrap;
+}
+
+.analysis-checklist {
+    list-style: none;
+    margin: 0;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #fff;
+    min-height: 120px;
+}
+
+.checklist-item {
+    display: grid;
+    grid-template-columns: 24px 1fr;
+    gap: 8px;
+    align-items: start;
+    padding: 8px;
+    border: 1px solid #e5e5e5;
+    border-radius: 6px;
+    background: #fafafa;
+    color: #555;
+    font-size: 13px;
+}
+
+.checklist-marker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px solid #ccc;
+    background: #fff;
+    color: #777;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.checklist-title {
+    font-weight: 700;
+    color: #333;
+}
+
+.checklist-detail {
+    display: block;
+    margin-top: 2px;
+    color: #666;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.checklist-item.pending .checklist-marker { background: #f8f9fa; }
+.checklist-item.running {
+    background: #fff8e1;
+    border-color: #ffd966;
+}
+.checklist-item.running .checklist-marker {
+    background: #ffc107;
+    border-color: #ffc107;
+    color: #664d03;
+}
+.checklist-item.completed {
+    background: #edf9f0;
+    border-color: #9bd7a8;
+}
+.checklist-item.completed .checklist-marker {
+    background: #28a745;
+    border-color: #28a745;
+    color: #fff;
+}
+.checklist-item.error {
+    background: #fff0f0;
+    border-color: #f1aeb5;
+}
+.checklist-item.error .checklist-marker {
+    background: #dc3545;
+    border-color: #dc3545;
+    color: #fff;
+}
+
+.checklist-empty {
+    color: #666;
+    font-style: italic;
+    font-size: 13px;
 }
 
 .analysis-log-header {

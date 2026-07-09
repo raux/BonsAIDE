@@ -78,6 +78,48 @@ test('analyzeCheckout ranks and formats likely impacted snippets', () => {
   }
 });
 
+test('analyzeCheckout uses issue location hypotheses to rank potential bug files', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bonsai-repo-analyzer-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'src'));
+    fs.writeFileSync(path.join(dir, 'src', 'billing.ts'), [
+      'export function paymentTimeout() {',
+      '  return "timeout timeout timeout timeout timeout";',
+      '}',
+    ].join('\n'));
+    fs.writeFileSync(path.join(dir, 'src', 'model-restore.ts'), [
+      'export function restoreModel() {',
+      '  throw new Error("No model loaded");',
+      '}',
+    ].join('\n'));
+
+    const analysis = analyzeCheckout(dir, 'owner', 'repo', {
+      number: 840,
+      title: 'Timeout reports no model loaded',
+      html_url: 'https://github.com/owner/repo/issues/840',
+      labels: [{ name: 'bug' }],
+      body: 'After auto-unload restore timeout, the app reports No model loaded.',
+    }, {
+      locationHypothesis: {
+        rephrasedIssue: 'Auto-unload restore can leave the model unloaded after a timeout.',
+        suspectedBehavior: ['restore timeout leaves model unloaded'],
+        likelyComponents: ['model lifecycle'],
+        likelyFiles: ['src/model-restore.ts'],
+        likelyFunctions: ['restoreModel'],
+        searchSignals: ['No model loaded'],
+        negativeSignals: ['billing'],
+      },
+    });
+
+    assert.equal(analysis.snippets[0].file, 'src/model-restore.ts');
+    assert.ok(analysis.locationHypothesis);
+    assert.match(analysis.content, /## Issue interpretation/);
+    assert.match(analysis.content, /Auto-unload restore can leave/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('formatFixSpecification and writeFixSpecFile create agentic fix spec files', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bonsai-repo-analyzer-'));
   const specRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bonsai-repo-specs-'));

@@ -24,7 +24,7 @@ import * as path from 'path';
 import { computeLeafSimilaritiesForCode, SimilarityBranch, SimilarityNode } from './similarity';
 import { analyzeCodeWithLizardServer } from './lizard-server';
 import { Branch, CodeNode, LizardMetrics, createGraphFromBranch, importBonsaiPayload, trimBranchAtNode } from './bonsai-state';
-import { analyzeRepoForIssue, writeFixSpecFile, RepoIssueAnalysis } from './repo-analyzer';
+import { analyzeRepoForIssue, writeFixSpecFile, IssueLocationHypothesis, RepoIssueAnalysis } from './repo-analyzer';
 import { discoverPiModels } from './pi-models';
 import { generateViaSubscription, promptViaPiModel } from './pi-subscription-rpc';
 import { formatGitHubIssues, GitHubIssueForDisplay, mimeType, parseGitHubUrl } from './server-utils';
@@ -262,6 +262,72 @@ async function fetchGitHubRepoContent(owner: string, repo: string): Promise<stri
   return summary;
 }
 
+export function buildIssueLocationHypothesisPrompt(issue: GitHubIssueForDisplay): string {
+  return `
+You are a senior software-maintenance agent. Rephrase this GitHub issue into repository-search signals that can help locate the likely bug area before any code is executed.
+
+Return ONLY valid JSON with this exact shape:
+{
+  "rephrasedIssue": "one concise maintenance-focused restatement",
+  "suspectedBehavior": ["observable broken behavior or invariant"],
+  "likelyComponents": ["component, subsystem, feature, CLI command, UI area, or integration"],
+  "likelyFiles": ["possible file/path names or path fragments; use cautious guesses"],
+  "likelyFunctions": ["possible function/class/method/identifier names"],
+  "searchSignals": ["concrete search terms, error strings, config keys, command names, or domain words"],
+  "negativeSignals": ["terms that likely indicate unrelated areas"]
+}
+
+Rules:
+- Keep arrays short: 3 to 8 items each.
+- Prefer terms likely to appear in code: identifiers, file stems, commands, error messages, configuration names.
+- Do not claim certainty. Use cautious location hypotheses.
+- Do not include Markdown or code fences.
+
+Issue: #${issue.number} ${issue.title}
+URL: ${issue.html_url || '(none)'}
+Labels: ${(issue.labels || []).map(label => label.name).filter(Boolean).join(', ') || '(none)'}
+
+Issue description:
+${issue.body || 'No description provided.'}
+  `.trim();
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) { return []; }
+  return value
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+export function parseIssueLocationHypothesis(raw: string): IssueLocationHypothesis {
+  const trimmed = (raw || '').trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const candidate = fenced || trimmed.match(/\{[\s\S]*\}/)?.[0] || trimmed;
+  const parsed = JSON.parse(candidate) as Record<string, unknown>;
+  return {
+    rephrasedIssue: typeof parsed.rephrasedIssue === 'string' ? parsed.rephrasedIssue.trim() : '',
+    suspectedBehavior: stringArray(parsed.suspectedBehavior),
+    likelyComponents: stringArray(parsed.likelyComponents),
+    likelyFiles: stringArray(parsed.likelyFiles),
+    likelyFunctions: stringArray(parsed.likelyFunctions),
+    searchSignals: stringArray(parsed.searchSignals),
+    negativeSignals: stringArray(parsed.negativeSignals),
+  };
+}
+
+async function generateIssueLocationHypothesis(issue: GitHubIssueForDisplay): Promise<IssueLocationHypothesis> {
+  const selected = requireSelectedPiModel();
+  const result = await promptViaPiModel({
+    provider: selected.provider,
+    modelId: selected.modelId,
+    prompt: buildIssueLocationHypothesisPrompt(issue),
+    timeoutMs: 180000
+  });
+  return parseIssueLocationHypothesis(result.text);
+}
+
 /** Build the Pi prompt used to turn static repo snippets into concrete fix steps. */
 export function buildAgenticFixAnalysisPrompt(analysis: RepoIssueAnalysis): string {
   const snippetContext = analysis.snippets.map((snippet, index) => [
@@ -271,6 +337,16 @@ export function buildAgenticFixAnalysisPrompt(analysis: RepoIssueAnalysis): stri
     snippet.code,
     '```'
   ].join('\n')).join('\n\n');
+  const hypothesis = analysis.locationHypothesis;
+  const issueInterpretation = hypothesis ? [
+    `Rephrased issue: ${hypothesis.rephrasedIssue || '(not provided)'}`,
+    `Suspected behavior: ${hypothesis.suspectedBehavior.join(', ') || '(none)'}`,
+    `Likely components: ${hypothesis.likelyComponents.join(', ') || '(none)'}`,
+    `Likely files: ${hypothesis.likelyFiles.join(', ') || '(none)'}`,
+    `Likely functions: ${hypothesis.likelyFunctions.join(', ') || '(none)'}`,
+    `Search signals: ${hypothesis.searchSignals.join(', ') || '(none)'}`,
+    `Negative signals: ${hypothesis.negativeSignals.join(', ') || '(none)'}`,
+  ].join('\n') : '(Issue rephrasing was unavailable; fallback search signals were used.)';
 
   return `
 You are a senior software-maintenance agent. Given a GitHub issue and statically gathered repository snippets, draft practical fix steps.
@@ -295,7 +371,10 @@ URL: ${analysis.issue.html_url || '(none)'}
 Issue description:
 ${analysis.issue.body || 'No description provided.'}
 
-Extracted keywords:
+Issue interpretation:
+${issueInterpretation}
+
+Context search signals:
 ${analysis.keywords.join(', ') || '(none)'}
 
 Statically gathered snippets:
@@ -336,7 +415,7 @@ export function buildRepoIssueSnippetNodes(
       `Snippet: ${snippet.file}:${snippet.startLine}-${snippet.endLine}`,
       `Score: ${snippet.score}`,
       `Reason: ${snippet.reason}`,
-      `Keywords: ${analysis.keywords.join(', ') || '(none)'}`,
+      `Search signals: ${analysis.keywords.join(', ') || '(none)'}`,
       `Fix specification file: ${analysis.specPath ?? 'not written'}`,
       'This node contains one statically gathered impacted snippet. No repository code was executed.'
     ].join('\n'),
@@ -817,21 +896,40 @@ async function handleMessage(message: any): Promise<void> {
       }
       broadcast({ command: 'analysisLogStep', stepIndex: 0, action: 'update', status: 'completed', detail: `${parsed.owner}/${parsed.repo}` });
 
-      // Step 2: Clone/checkout repository
+      // Step 2: Rephrase the issue into location hypotheses before scanning the checkout
       let stepIndex = 1;
+      let locationHypothesis: IssueLocationHypothesis | undefined;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Rephrasing issue into search signals', status: 'running' });
+      try {
+        locationHypothesis = await generateIssueLocationHypothesis(issue);
+        broadcast({
+          command: 'analysisLogStep',
+          stepIndex,
+          action: 'update',
+          status: 'completed',
+          detail: locationHypothesis.rephrasedIssue || `${locationHypothesis.searchSignals.length} search signal(s)`
+        });
+      } catch (err: any) {
+        bonsaiLog('Issue rephrasing failed; falling back to static issue terms:', err?.message || err);
+        broadcast({
+          command: 'analysisLogStep',
+          stepIndex,
+          action: 'update',
+          status: 'completed',
+          detail: 'Rephrasing failed; falling back to static issue terms.'
+        });
+      }
+
+      // Step 3: Clone/checkout repository and scan with interpreted signals
+      stepIndex++;
       broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Cloning/updating repository', status: 'running' });
-      const analysis = await analyzeRepoForIssue(parsed.owner, parsed.repo, issue);
+      const analysis = await analyzeRepoForIssue(parsed.owner, parsed.repo, issue, { locationHypothesis });
       broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${analysis.repoPath}` });
 
-      // Step 3: Extract keywords
+      // Step 4: Identify potential bug locations from the interpreted scan
       stepIndex++;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Extracting keywords', status: 'running' });
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${analysis.keywords.length} keyword(s): ${analysis.keywords.slice(0, 3).join(', ')}...` });
-
-      // Step 4: Finding impacted snippets
-      stepIndex++;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Finding impacted snippets', status: 'running' });
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${analysis.snippets.length} snippet(s) found` });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Identifying potential bug locations', status: 'running' });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${analysis.snippets.length} snippet(s), ${analysis.keywords.length} search signal(s)` });
       if (analysis.snippets.length === 0) {
         throw new Error('No impacted snippets found for the selected issue.');
       }
@@ -877,6 +975,7 @@ async function handleMessage(message: any): Promise<void> {
         nodes: snippetNodes,
         snippets: analysis.snippets,
         keywords: analysis.keywords,
+        locationHypothesis: analysis.locationHypothesis,
         repoPath: analysis.repoPath,
         specPath: analysis.specPath
       });

@@ -48,14 +48,25 @@
             <pre id="selectedIssueBody" class="issue-body">Collect issues, then select one to view its description.</pre>
             <div id="repoAnalysisStatus" class="issue-analysis-status" aria-live="polite"></div>
         </div>
-        <div id="analysisLogPanel" class="analysis-log-panel">
-            <div class="analysis-log-header">
-                <button id="btnToggleAnalysisLog" class="log-toggle" title="Toggle analysis log">▶ Analysis Log</button>
-                <button id="btnClearAnalysisLog" class="log-clear" title="Clear log" style="display:none;">Clear</button>
+        <div class="analysis-sidecar">
+            <div id="analysisChecklistPanel" class="analysis-checklist-panel">
+                <div class="analysis-checklist-header">
+                    <h3>Repo Analysis Checklist</h3>
+                    <span id="analysisChecklistProgress" class="checklist-progress">0/0 done</span>
+                </div>
+                <ol id="analysisChecklist" class="analysis-checklist" aria-live="polite">
+                    <li class="checklist-empty">Run “Analyze Repo for Fix” to see the steps.</li>
+                </ol>
             </div>
-            <div id="analysisLogContent" class="analysis-log-content" style="display:none;">
-                <div id="analysisLogModel" class="log-model">Model: —</div>
-                <div id="analysisLogSteps" class="log-steps"></div>
+            <div id="analysisLogPanel" class="analysis-log-panel">
+                <div class="analysis-log-header">
+                    <button id="btnToggleAnalysisLog" class="log-toggle" title="Toggle analysis log">▶ Analysis Log</button>
+                    <button id="btnClearAnalysisLog" class="log-clear" title="Clear log" style="display:none;">Clear</button>
+                </div>
+                <div id="analysisLogContent" class="analysis-log-content" style="display:none;">
+                    <div id="analysisLogModel" class="log-model">Model: —</div>
+                    <div id="analysisLogSteps" class="log-steps"></div>
+                </div>
             </div>
         </div>
     </div>

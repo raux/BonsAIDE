@@ -191,6 +191,7 @@ document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', functi
     }
 
     analysisLogClear();
+    analysisChecklistStart();
     var modelId = getSelectedModelId();
     analysisLogSetModel(modelId);
 
@@ -210,11 +211,22 @@ document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', functi
 var analysisLogState = { model: '', steps: [] };
 var analysisLogStartTime = 0;
 
+var DEFAULT_ANALYSIS_CHECKLIST = [
+    'Validate GitHub URL',
+    'Rephrase issue into search signals',
+    'Clone/update repository',
+    'Identify potential bug locations',
+    'Draft fix steps with Pi model',
+    'Create Bonsai snippet nodes'
+];
+var analysisChecklistState = [];
+
 function analysisLogClear() {
     analysisLogState = { model: '', steps: [] };
     analysisLogStartTime = Date.now();
     var stepsDiv = document.getElementById('analysisLogSteps');
     if (stepsDiv) { stepsDiv.innerHTML = ''; }
+    analysisChecklistClear();
 }
 
 function analysisLogSetModel(modelId) {
@@ -252,7 +264,7 @@ function analysisLogRender() {
     var stepsDiv = document.getElementById('analysisLogSteps');
     if (!stepsDiv) { return; }
     stepsDiv.innerHTML = '';
-    analysisLogState.steps.forEach(function (step, index) {
+    analysisLogState.steps.forEach(function (step) {
         var stepEl = document.createElement('div');
         stepEl.className = 'log-step ' + step.status;
         var titleEl = document.createElement('span');
@@ -266,6 +278,101 @@ function analysisLogRender() {
             stepEl.appendChild(detailEl);
         }
         stepsDiv.appendChild(stepEl);
+    });
+}
+
+function analysisChecklistClear() {
+    analysisChecklistState = [];
+    analysisChecklistRender();
+}
+
+function analysisChecklistStart() {
+    analysisChecklistState = DEFAULT_ANALYSIS_CHECKLIST.map(function (title) {
+        return { title: title, detail: '', status: 'pending' };
+    });
+    analysisChecklistRender();
+}
+
+function analysisChecklistEnsureStep(stepIndex, stepName) {
+    if (!analysisChecklistState.length) {
+        analysisChecklistStart();
+    }
+    while (stepIndex >= analysisChecklistState.length) {
+        analysisChecklistState.push({ title: 'Step ' + (analysisChecklistState.length + 1), detail: '', status: 'pending' });
+    }
+    if (stepName && !DEFAULT_ANALYSIS_CHECKLIST[stepIndex]) {
+        analysisChecklistState[stepIndex].title = stepName;
+    }
+}
+
+function analysisChecklistUpdateStep(stepIndex, stepName, status, detail) {
+    if (typeof stepIndex !== 'number' || stepIndex < 0) { return; }
+    analysisChecklistEnsureStep(stepIndex, stepName);
+    if (status) {
+        analysisChecklistState[stepIndex].status = status;
+    }
+    if (detail !== undefined) {
+        analysisChecklistState[stepIndex].detail = detail || '';
+    } else if (stepName && stepName !== analysisChecklistState[stepIndex].title) {
+        analysisChecklistState[stepIndex].detail = stepName;
+    }
+    analysisChecklistRender();
+}
+
+function analysisChecklistMarkError(detail) {
+    if (!analysisChecklistState.length) {
+        analysisChecklistStart();
+    }
+    var runningIndex = analysisChecklistState.findIndex(function (step) { return step.status === 'running'; });
+    var targetIndex = runningIndex >= 0 ? runningIndex : analysisChecklistState.findIndex(function (step) { return step.status === 'pending'; });
+    if (targetIndex < 0) { targetIndex = analysisChecklistState.length - 1; }
+    analysisChecklistState[targetIndex].status = 'error';
+    analysisChecklistState[targetIndex].detail = detail || analysisChecklistState[targetIndex].detail || 'Analysis failed.';
+    analysisChecklistRender();
+}
+
+function analysisChecklistRender() {
+    var listEl = document.getElementById('analysisChecklist');
+    var progressEl = document.getElementById('analysisChecklistProgress');
+    if (!listEl) { return; }
+
+    listEl.innerHTML = '';
+    if (!analysisChecklistState.length) {
+        var emptyEl = document.createElement('li');
+        emptyEl.className = 'checklist-empty';
+        emptyEl.textContent = 'Run “Analyze Repo for Fix” to see the steps.';
+        listEl.appendChild(emptyEl);
+        if (progressEl) { progressEl.textContent = '0/0 done'; }
+        return;
+    }
+
+    var completed = analysisChecklistState.filter(function (step) { return step.status === 'completed'; }).length;
+    if (progressEl) { progressEl.textContent = completed + '/' + analysisChecklistState.length + ' done'; }
+
+    analysisChecklistState.forEach(function (step, index) {
+        var itemEl = document.createElement('li');
+        itemEl.className = 'checklist-item ' + step.status;
+
+        var markerEl = document.createElement('span');
+        markerEl.className = 'checklist-marker';
+        markerEl.textContent = step.status === 'completed' ? '✓' : step.status === 'error' ? '!' : String(index + 1);
+        itemEl.appendChild(markerEl);
+
+        var bodyEl = document.createElement('div');
+        var titleEl = document.createElement('span');
+        titleEl.className = 'checklist-title';
+        titleEl.textContent = step.title;
+        bodyEl.appendChild(titleEl);
+
+        if (step.detail) {
+            var detailEl = document.createElement('span');
+            detailEl.className = 'checklist-detail';
+            detailEl.textContent = step.detail;
+            bodyEl.appendChild(detailEl);
+        }
+
+        itemEl.appendChild(bodyEl);
+        listEl.appendChild(itemEl);
     });
 }
 
@@ -755,10 +862,13 @@ window.addEventListener('message', function (event) {
     if (message.command === 'analysisLogStep') {
         if (message.action === 'add') {
             analysisLogAddStep(message.stepName, message.detail, message.status);
+            analysisChecklistUpdateStep(message.stepIndex, message.stepName, message.status || 'pending', message.detail);
         } else if (message.action === 'update') {
             analysisLogUpdateStep(message.stepIndex, message.status, message.detail);
+            analysisChecklistUpdateStep(message.stepIndex, message.stepName, message.status, message.detail);
         } else if (message.action === 'error') {
             analysisLogAddStep('Error', message.detail, 'error');
+            analysisChecklistMarkError(message.detail);
         }
     }
 

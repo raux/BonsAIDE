@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAgenticFixAnalysisPrompt, buildRepoIssueSnippetNodes } from '../out-server/server.js';
+import {
+  buildAgenticFixAnalysisPrompt,
+  buildIssueLocationHypothesisPrompt,
+  buildRepoIssueSnippetNodes,
+  parseIssueLocationHypothesis,
+} from '../out-server/server.js';
 
 function makeIssue() {
   return {
@@ -23,6 +28,49 @@ function makeSnippet(index) {
     reason: `Matched restore keyword ${index}`,
   };
 }
+
+test('issue location hypothesis prompt asks for strict JSON search signals', () => {
+  const prompt = buildIssueLocationHypothesisPrompt(makeIssue());
+
+  assert.match(prompt, /Return ONLY valid JSON/);
+  assert.match(prompt, /"rephrasedIssue"/);
+  assert.match(prompt, /"likelyFiles"/);
+  assert.match(prompt, /"searchSignals"/);
+  assert.match(prompt, /No model loaded/);
+});
+
+test('parseIssueLocationHypothesis parses fenced model JSON defensively', () => {
+  const parsed = parseIssueLocationHypothesis('```json\n{"rephrasedIssue":"Restore times out","suspectedBehavior":["model restore fails"],"likelyComponents":["model lifecycle"],"likelyFiles":["Services/ModelLoader.swift"],"likelyFunctions":["restoreModel"],"searchSignals":["No model loaded"],"negativeSignals":["billing"]}\n```');
+
+  assert.equal(parsed.rephrasedIssue, 'Restore times out');
+  assert.deepEqual(parsed.likelyFiles, ['Services/ModelLoader.swift']);
+  assert.deepEqual(parsed.searchSignals, ['No model loaded']);
+});
+
+test('agentic fix analysis prompt includes issue interpretation when available', () => {
+  const prompt = buildAgenticFixAnalysisPrompt({
+    owner: 'TypeWhisper',
+    repo: 'typewhisper-mac',
+    repoPath: '/tmp/typewhisper-mac',
+    issue: makeIssue(),
+    keywords: ['parakeet', 'restore'],
+    snippets: [makeSnippet(1)],
+    content: 'Static context gathered for agentic fix analysis',
+    locationHypothesis: {
+      rephrasedIssue: 'Auto-unload restore can leave Parakeet without a loaded model.',
+      suspectedBehavior: ['restore timeout leaves model unloaded'],
+      likelyComponents: ['model lifecycle'],
+      likelyFiles: ['TypeWhisper/Services/File1.swift'],
+      likelyFunctions: ['restoreModel'],
+      searchSignals: ['No model loaded'],
+      negativeSignals: ['billing'],
+    },
+  });
+
+  assert.match(prompt, /Issue interpretation:/);
+  assert.match(prompt, /Auto-unload restore can leave Parakeet/);
+  assert.match(prompt, /Likely files: TypeWhisper\/Services\/File1\.swift/);
+});
 
 test('agentic fix analysis prompt asks for concrete fix steps', () => {
   const prompt = buildAgenticFixAnalysisPrompt({
@@ -91,7 +139,7 @@ test('agentic repo analysis snippet nodes preserve file metadata and combined sn
   assert.match(node.reasoning, /Snippet: TypeWhisper\/Services\/File3\.swift:30-34/);
   assert.match(node.reasoning, /Score: 97/);
   assert.match(node.reasoning, /Reason: Matched restore keyword 3/);
-  assert.match(node.reasoning, /Keywords: restore/);
+  assert.match(node.reasoning, /Search signals: restore/);
   assert.match(node.reasoning, /No repository code was executed/);
   assert.match(result.combinedSnippetContent, /Snippet 1: TypeWhisper\/Services\/File3\.swift:30-34/);
   assert.match(result.combinedSnippetContent, /```\nfunc restore3\(\)/);
