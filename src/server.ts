@@ -262,9 +262,8 @@ async function fetchGitHubRepoContent(owner: string, repo: string): Promise<stri
   return summary;
 }
 
-/** Fetch open GitHub issues and format them for display in the UI. */
-async function generateAgenticFixAnalysis(analysis: RepoIssueAnalysis): Promise<string> {
-  const selected = requireSelectedPiModel();
+/** Build the Pi prompt used to turn static repo snippets into concrete fix steps. */
+export function buildAgenticFixAnalysisPrompt(analysis: RepoIssueAnalysis): string {
   const snippetContext = analysis.snippets.map((snippet, index) => [
     `Snippet ${index + 1}: ${snippet.file}:${snippet.startLine}-${snippet.endLine}`,
     `Reason: ${snippet.reason}`,
@@ -273,15 +272,21 @@ async function generateAgenticFixAnalysis(analysis: RepoIssueAnalysis): Promise<
     '```'
   ].join('\n')).join('\n\n');
 
-  const prompt = `
-You are a senior software-maintenance agent. Given a GitHub issue and statically gathered repository snippets, draft a practical fix specification.
+  return `
+You are a senior software-maintenance agent. Given a GitHub issue and statically gathered repository snippets, draft practical fix steps.
 Return concise Markdown with exactly these sections:
 ## Root-cause hypothesis
 ## Impacted code
-## Fix specification
+## Fix steps
 ## Test plan
 ## Risks and checks
-Do not claim you executed the repository. Do not invent files beyond the provided context unless clearly marked as unknown.
+
+Fix-step requirements:
+- Prefer numbered, concrete steps that a developer can execute.
+- Reference provided files and line ranges when relevant.
+- Separate code changes from tests and verification checks.
+- Do not claim you executed the repository.
+- Do not invent files beyond the provided context unless clearly marked as unknown.
 
 Repository: ${analysis.owner}/${analysis.repo}
 Issue: #${analysis.issue.number} ${analysis.issue.title}
@@ -296,11 +301,14 @@ ${analysis.keywords.join(', ') || '(none)'}
 Statically gathered snippets:
 ${snippetContext || '(No matching snippets found.)'}
   `.trim();
+}
 
+async function generateAgenticFixAnalysis(analysis: RepoIssueAnalysis): Promise<string> {
+  const selected = requireSelectedPiModel();
   const result = await promptViaPiModel({
     provider: selected.provider,
     modelId: selected.modelId,
-    prompt,
+    prompt: buildAgenticFixAnalysisPrompt(analysis),
     timeoutMs: 300000
   });
   return result.text;
@@ -824,8 +832,18 @@ async function handleMessage(message: any): Promise<void> {
       stepIndex++;
       broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Finding impacted snippets', status: 'running' });
       broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${analysis.snippets.length} snippet(s) found` });
+      if (analysis.snippets.length === 0) {
+        throw new Error('No impacted snippets found for the selected issue.');
+      }
 
-      // Step 5: Creating one Bonsai node per impacted snippet
+      // Step 5: Drafting model-assisted fix steps and updating the spec file
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Drafting fix steps with Pi model', status: 'running' });
+      analysis.agenticAnalysis = await generateAgenticFixAnalysis(analysis);
+      analysis.specPath = await writeFixSpecFile(analysis);
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `Updated spec: ${analysis.specPath}` });
+
+      // Step 6: Creating one Bonsai node per impacted snippet
       stepIndex++;
       broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Creating snippet nodes', status: 'running' });
       
@@ -841,10 +859,6 @@ async function handleMessage(message: any): Promise<void> {
 
       const snippetNodeResult = buildRepoIssueSnippetNodes(analysis, issue, parsed, parentId, currentId);
       const snippetNodes = snippetNodeResult.nodes;
-
-      if (snippetNodes.length === 0) {
-        throw new Error('No impacted snippets found for the selected issue.');
-      }
 
       currentId = snippetNodeResult.lastNodeId;
       branch.nodes.push(...snippetNodes);

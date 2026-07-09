@@ -97,6 +97,7 @@ test('formatFixSpecification and writeFixSpecFile create agentic fix spec files'
     const spec = formatFixSpecification(analysis);
     assert.match(spec, /# Fix Specification: owner\/repo issue #62/);
     assert.match(spec, /## Agentic analysis method/);
+    assert.match(spec, /## Agentic fix steps/);
     assert.match(spec, /No repository code was executed/);
     assert.match(spec, /The search skill is missing/);
     assert.match(spec, /src\/freehire-search.ts/);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRepoIssueSnippetNodes } from '../out-server/server.js';
+import { buildAgenticFixAnalysisPrompt, buildRepoIssueSnippetNodes } from '../out-server/server.js';
 
 function makeIssue() {
   return {
@@ -23,6 +23,24 @@ function makeSnippet(index) {
     reason: `Matched restore keyword ${index}`,
   };
 }
+
+test('agentic fix analysis prompt asks for concrete fix steps', () => {
+  const prompt = buildAgenticFixAnalysisPrompt({
+    owner: 'TypeWhisper',
+    repo: 'typewhisper-mac',
+    repoPath: '/tmp/typewhisper-mac',
+    issue: makeIssue(),
+    keywords: ['parakeet', 'restore'],
+    snippets: [makeSnippet(1)],
+    content: 'Static context gathered for agentic fix analysis',
+  });
+
+  assert.match(prompt, /draft practical fix steps/);
+  assert.match(prompt, /## Fix steps/);
+  assert.match(prompt, /Prefer numbered, concrete steps/);
+  assert.match(prompt, /TypeWhisper\/Services\/File1\.swift:10-14/);
+  assert.match(prompt, /Do not claim you executed the repository/);
+});
 
 test('agentic repo analysis creates one Bonsai node per impacted snippet', () => {
   const snippets = Array.from({ length: 8 }, (_, index) => makeSnippet(index + 1));

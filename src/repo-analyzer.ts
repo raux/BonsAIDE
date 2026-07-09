@@ -264,11 +264,11 @@ export function formatFixSpecification(analysis: RepoIssueAnalysis): string {
   lines.push('## Extracted context keywords');
   lines.push(analysis.keywords.length ? analysis.keywords.join(', ') : '(none)');
   lines.push('');
-  lines.push('## Agentic fix specification');
+  lines.push('## Agentic fix steps');
   if (analysis.agenticAnalysis) {
     lines.push(analysis.agenticAnalysis.trim());
   } else {
-    lines.push('- Agentic analysis was not attached yet. Review the snippets below before editing.');
+    lines.push('- Agentic fix steps were not attached yet. Review the snippets below before editing.');
   }
   lines.push('');
   lines.push('## Context snippets supplied to the agent');
