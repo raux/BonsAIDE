@@ -336,9 +336,16 @@ export interface FixTodo {
   tests: string[];
 }
 
+export interface FixImplementation {
+  title: string;
+  summary: string;
+  todos: FixTodo[];
+}
+
 export interface FixAlternative {
   title: string;
   summary: string;
+  implementations: FixImplementation[];
   todos: FixTodo[];
 }
 
@@ -367,7 +374,7 @@ function issueInterpretationForPrompt(analysis: RepoIssueAnalysis): string {
 
 export function buildFixAlternativesPrompt(analysis: RepoIssueAnalysis): string {
   return `
-You are a senior software-maintenance agent. Given a GitHub issue, issue interpretation, and statically gathered repository snippets, propose exactly 3 alternative fix plans.
+You are a senior software-maintenance agent. Given a GitHub issue, issue interpretation, and statically gathered repository snippets, propose exactly 2 alternative fix plans.
 
 Return ONLY valid JSON with this exact shape:
 {
@@ -375,13 +382,19 @@ Return ONLY valid JSON with this exact shape:
     {
       "title": "short title such as Minimal localized guard",
       "summary": "one-sentence tradeoff summary",
-      "todos": [
+      "implementations": [
         {
-          "bugLocation": "file/path:line-range and why this is likely relevant",
-          "fixIdea": "concrete change to make",
-          "potentialMethod": "function/class/method/identifier to edit or add",
-          "sourceCodeSketch": "small illustrative code sketch, patch fragment, or pseudocode",
-          "tests": ["specific regression/unit/manual check"]
+          "title": "short implementation label such as Inline guard",
+          "summary": "one-sentence tradeoff for this implementation",
+          "todos": [
+            {
+              "bugLocation": "file/path:line-range and why this is likely relevant",
+              "fixIdea": "concrete change to make",
+              "potentialMethod": "function/class/method/identifier to edit or add",
+              "sourceCodeSketch": "small illustrative code sketch, patch fragment, or pseudocode",
+              "tests": ["specific regression/unit/manual check"]
+            }
+          ]
         }
       ]
     }
@@ -389,8 +402,10 @@ Return ONLY valid JSON with this exact shape:
 }
 
 Requirements:
-- Provide exactly 3 alternatives.
-- Each alternative must be a todo/checklist-style plan with 2 to 5 todos.
+- Provide exactly 2 alternatives.
+- Each alternative must contain exactly 2 implementation options.
+- Each implementation must be meaningfully different from the other implementation in the same alternative.
+- Each implementation must be a todo/checklist-style plan with 2 to 5 todos.
 - Each todo must include bugLocation, fixIdea, potentialMethod, sourceCodeSketch, and tests.
 - Prefer concrete bug locations from the provided snippets.
 - Make the alternatives meaningfully different, e.g. minimal guard, refactor/state-machine fix, defensive validation/observability fix.
@@ -420,22 +435,45 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function coerceFixTodo(value: unknown): FixTodo {
+  const todo = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  return {
+    bugLocation: stringValue(todo.bugLocation),
+    fixIdea: stringValue(todo.fixIdea),
+    potentialMethod: stringValue(todo.potentialMethod),
+    sourceCodeSketch: stringValue(todo.sourceCodeSketch),
+    tests: stringArray(todo.tests),
+  };
+}
+
+function hasFixTodoContent(todo: FixTodo): boolean {
+  return Boolean(todo.bugLocation || todo.fixIdea || todo.potentialMethod || todo.sourceCodeSketch || todo.tests.length > 0);
+}
+
 function coerceFixAlternative(value: unknown, index = 0): FixAlternative {
   const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
-  const rawTodos = Array.isArray(raw.todos) ? raw.todos : [];
+  const legacyTodos = (Array.isArray(raw.todos) ? raw.todos : [])
+    .slice(0, 8)
+    .map(coerceFixTodo)
+    .filter(hasFixTodoContent);
+  const rawImplementations = Array.isArray(raw.implementations) ? raw.implementations : [];
+  const implementations = rawImplementations.slice(0, 2).map((implementationValue, implementationIndex): FixImplementation => {
+    const implementation = (implementationValue && typeof implementationValue === 'object' ? implementationValue : {}) as Record<string, unknown>;
+    const rawTodos = Array.isArray(implementation.todos) ? implementation.todos : [];
+    return {
+      title: stringValue(implementation.title) || `Implementation ${implementationIndex + 1}`,
+      summary: stringValue(implementation.summary),
+      todos: rawTodos.slice(0, 8).map(coerceFixTodo).filter(hasFixTodoContent),
+    };
+  }).filter(implementation => implementation.summary || implementation.todos.length > 0);
+  const normalizedImplementations = implementations.length > 0
+    ? implementations
+    : (legacyTodos.length > 0 ? [{ title: 'Implementation 1', summary: '', todos: legacyTodos }] : []);
   return {
     title: stringValue(raw.title) || `Alternative ${index + 1}`,
     summary: stringValue(raw.summary),
-    todos: rawTodos.slice(0, 8).map((todoValue): FixTodo => {
-      const todo = (todoValue && typeof todoValue === 'object' ? todoValue : {}) as Record<string, unknown>;
-      return {
-        bugLocation: stringValue(todo.bugLocation),
-        fixIdea: stringValue(todo.fixIdea),
-        potentialMethod: stringValue(todo.potentialMethod),
-        sourceCodeSketch: stringValue(todo.sourceCodeSketch),
-        tests: stringArray(todo.tests),
-      };
-    }).filter(todo => todo.bugLocation || todo.fixIdea || todo.potentialMethod || todo.sourceCodeSketch || todo.tests.length > 0),
+    implementations: normalizedImplementations,
+    todos: legacyTodos.length > 0 ? legacyTodos : normalizedImplementations.flatMap(implementation => implementation.todos),
   };
 }
 
@@ -445,28 +483,35 @@ export function parseFixAlternatives(raw: string): FixAlternative[] {
   const candidate = fenced || trimmed.match(/\{[\s\S]*\}/)?.[0] || trimmed;
   const parsed = JSON.parse(candidate) as Record<string, unknown>;
   const alternatives = Array.isArray(parsed.alternatives) ? parsed.alternatives : [];
-  return alternatives.slice(0, 3).map((alternative, index) => coerceFixAlternative(alternative, index));
+  return alternatives.slice(0, 2).map((alternative, index) => coerceFixAlternative(alternative, index));
 }
 
 export function formatFixAlternativeAsMarkdown(alternative: FixAlternative, index = 0): string {
   const lines: string[] = [];
+  const implementations = alternative.implementations.length > 0
+    ? alternative.implementations
+    : [{ title: 'Implementation 1', summary: '', todos: alternative.todos }];
   lines.push(`## Alternative ${index + 1}: ${alternative.title}`);
   if (alternative.summary) { lines.push('', alternative.summary); }
-  lines.push('');
-  alternative.todos.forEach((todo, todoIndex) => {
-    lines.push(`### Todo ${todoIndex + 1}`);
-    lines.push(`- [ ] Bug location: ${todo.bugLocation || '(unknown)'}`);
-    lines.push(`- [ ] Fix idea: ${todo.fixIdea || '(not specified)'}`);
-    lines.push(`- [ ] Potential method: ${todo.potentialMethod || '(not specified)'}`);
-    lines.push('- [ ] Potential source code:');
-    lines.push('```');
-    lines.push(todo.sourceCodeSketch || '// Source-code sketch not provided');
-    lines.push('```');
-    if (todo.tests.length > 0) {
-      lines.push('- [ ] Tests/checks:');
-      todo.tests.forEach(test => lines.push(`  - ${test}`));
-    }
+  implementations.forEach((implementation, implementationIndex) => {
+    lines.push('', `### Implementation ${implementationIndex + 1}: ${implementation.title}`);
+    if (implementation.summary) { lines.push('', implementation.summary); }
     lines.push('');
+    implementation.todos.forEach((todo, todoIndex) => {
+      lines.push(`#### Todo ${todoIndex + 1}`);
+      lines.push(`- [ ] Bug location: ${todo.bugLocation || '(unknown)'}`);
+      lines.push(`- [ ] Fix idea: ${todo.fixIdea || '(not specified)'}`);
+      lines.push(`- [ ] Potential method: ${todo.potentialMethod || '(not specified)'}`);
+      lines.push('- [ ] Potential source code:');
+      lines.push('```');
+      lines.push(todo.sourceCodeSketch || '// Source-code sketch not provided');
+      lines.push('```');
+      if (todo.tests.length > 0) {
+        lines.push('- [ ] Tests/checks:');
+        todo.tests.forEach(test => lines.push(`  - ${test}`));
+      }
+      lines.push('');
+    });
   });
   return lines.join('\n').trimEnd();
 }
@@ -1076,9 +1121,9 @@ async function handleMessage(message: any): Promise<void> {
         throw new Error('No impacted snippets found for the selected issue.');
       }
 
-      // Step 5: Drafting 3 model-assisted fix-plan alternatives and updating the spec file
+      // Step 5: Drafting 2 model-assisted fix-plan alternatives and updating the spec file
       stepIndex++;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Drafting 3 fix-plan alternatives', status: 'running' });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Drafting 2 fix-plan alternatives', status: 'running' });
       const fixAlternatives = await generateFixAlternatives(analysis);
       if (fixAlternatives.length === 0) {
         throw new Error('The selected Pi model did not return any fix alternatives.');

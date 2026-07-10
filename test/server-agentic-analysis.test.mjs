@@ -49,7 +49,7 @@ test('parseIssueLocationHypothesis parses fenced model JSON defensively', () => 
   assert.deepEqual(parsed.searchSignals, ['No model loaded']);
 });
 
-test('fix alternatives prompt asks for exactly three JSON todo plans', () => {
+test('fix alternatives prompt asks for exactly two JSON todo plans', () => {
   const prompt = buildFixAlternativesPrompt({
     owner: 'TypeWhisper',
     repo: 'typewhisper-mac',
@@ -69,35 +69,55 @@ test('fix alternatives prompt asks for exactly three JSON todo plans', () => {
     },
   });
 
-  assert.match(prompt, /propose exactly 3 alternative fix plans/);
+  assert.match(prompt, /propose exactly 2 alternative fix plans/);
+  assert.match(prompt, /Each alternative must contain exactly 2 implementation options/);
   assert.match(prompt, /"alternatives"/);
+  assert.match(prompt, /"implementations"/);
   assert.match(prompt, /"bugLocation"/);
   assert.match(prompt, /"sourceCodeSketch"/);
   assert.match(prompt, /Auto-unload restore can leave Parakeet/);
 });
 
-test('parseFixAlternatives parses JSON todo cards and formats markdown', () => {
+test('parseFixAlternatives parses implementation options and formats markdown', () => {
   const alternatives = parseFixAlternatives(JSON.stringify({
     alternatives: [{
       title: 'Minimal guard',
       summary: 'Guard restore before reporting status.',
-      todos: [{
-        bugLocation: 'TypeWhisper/Services/File1.swift:10-14',
-        fixIdea: 'Check model state after restore timeout.',
-        potentialMethod: 'restoreModel',
-        sourceCodeSketch: 'if model == nil { reloadModel() }',
-        tests: ['restore timeout regression'],
+      implementations: [{
+        title: 'Inline state guard',
+        summary: 'Keep the fix local to the restore path.',
+        todos: [{
+          bugLocation: 'TypeWhisper/Services/File1.swift:10-14',
+          fixIdea: 'Check model state after restore timeout.',
+          potentialMethod: 'restoreModel',
+          sourceCodeSketch: 'if model == nil { reloadModel() }',
+          tests: ['restore timeout regression'],
+        }],
+      }, {
+        title: 'Helper retry wrapper',
+        summary: 'Extract the reload check into a helper.',
+        todos: [{
+          bugLocation: 'TypeWhisper/Services/File1.swift:16-22',
+          fixIdea: 'Wrap restore with a bounded retry helper.',
+          potentialMethod: 'restoreWithRetry',
+          sourceCodeSketch: 'try await restoreWithRetry()',
+          tests: ['retry helper regression'],
+        }],
       }],
     }],
   }));
 
   assert.equal(alternatives.length, 1);
   assert.equal(alternatives[0].title, 'Minimal guard');
-  assert.equal(alternatives[0].todos[0].potentialMethod, 'restoreModel');
+  assert.equal(alternatives[0].implementations.length, 2);
+  assert.equal(alternatives[0].implementations[0].todos[0].potentialMethod, 'restoreModel');
+  assert.equal(alternatives[0].todos.length, 2);
   const markdown = formatFixAlternativesAsMarkdown(alternatives);
   assert.match(markdown, /## Alternative 1: Minimal guard/);
+  assert.match(markdown, /### Implementation 1: Inline state guard/);
+  assert.match(markdown, /### Implementation 2: Helper retry wrapper/);
   assert.match(markdown, /Bug location: TypeWhisper\/Services\/File1\.swift:10-14/);
-  assert.match(markdown, /restore timeout regression/);
+  assert.match(markdown, /retry helper regression/);
 });
 
 test('agentic repo analysis creates one Bonsai node per impacted snippet', () => {

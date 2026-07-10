@@ -217,7 +217,7 @@ var DEFAULT_ANALYSIS_CHECKLIST = [
     'Rephrase issue into search signals',
     'Clone/update repository',
     'Identify potential bug locations',
-    'Draft 3 fix-plan alternatives',
+    'Draft 2 fix-plan alternatives',
     'Display fix-plan todo cards'
 ];
 var analysisChecklistState = [];
@@ -434,29 +434,49 @@ function renderFixAlternatives(alternatives, context) {
             card.appendChild(summaryP);
         }
 
-        var todoList = document.createElement('ul');
-        todoList.className = 'fix-todo-list';
-        (alternative.todos || []).forEach(function (todo) {
-            var item = document.createElement('li');
-            item.className = 'fix-todo-item';
-            appendTextRow(item, 'Bug location', todo.bugLocation);
-            appendTextRow(item, 'Fix idea', todo.fixIdea);
-            appendTextRow(item, 'Potential method', todo.potentialMethod);
-            if (todo.sourceCodeSketch) {
-                var codeLabel = document.createElement('label');
-                codeLabel.textContent = 'Potential source code';
-                item.appendChild(codeLabel);
-                var code = document.createElement('pre');
-                code.className = 'fix-code-sketch';
-                code.textContent = todo.sourceCodeSketch;
-                item.appendChild(code);
+        var implementations = Array.isArray(alternative.implementations) && alternative.implementations.length
+            ? alternative.implementations
+            : [{ title: 'Implementation 1', summary: '', todos: alternative.todos || [] }];
+        implementations.forEach(function (implementation, implementationIndex) {
+            var implementationSection = document.createElement('div');
+            implementationSection.className = 'fix-implementation';
+
+            var implementationTitle = document.createElement('h5');
+            implementationTitle.textContent = 'Implementation ' + (implementationIndex + 1) + ': ' + (implementation.title || 'Untitled implementation');
+            implementationSection.appendChild(implementationTitle);
+
+            if (implementation.summary) {
+                var implementationSummary = document.createElement('p');
+                implementationSummary.className = 'fix-implementation-summary';
+                implementationSummary.textContent = implementation.summary;
+                implementationSection.appendChild(implementationSummary);
             }
-            if (Array.isArray(todo.tests) && todo.tests.length) {
-                appendTextRow(item, 'Tests/checks', todo.tests.join('\n'));
-            }
-            todoList.appendChild(item);
+
+            var todoList = document.createElement('ul');
+            todoList.className = 'fix-todo-list';
+            (implementation.todos || []).forEach(function (todo) {
+                var item = document.createElement('li');
+                item.className = 'fix-todo-item';
+                appendTextRow(item, 'Bug location', todo.bugLocation);
+                appendTextRow(item, 'Fix idea', todo.fixIdea);
+                appendTextRow(item, 'Potential method', todo.potentialMethod);
+                if (todo.sourceCodeSketch) {
+                    var codeLabel = document.createElement('label');
+                    codeLabel.textContent = 'Potential source code';
+                    item.appendChild(codeLabel);
+                    var code = document.createElement('pre');
+                    code.className = 'fix-code-sketch';
+                    code.textContent = todo.sourceCodeSketch;
+                    item.appendChild(code);
+                }
+                if (Array.isArray(todo.tests) && todo.tests.length) {
+                    appendTextRow(item, 'Tests/checks', todo.tests.join('\n'));
+                }
+                todoList.appendChild(item);
+            });
+            implementationSection.appendChild(todoList);
+            card.appendChild(implementationSection);
         });
-        card.appendChild(todoList);
 
         var button = document.createElement('button');
         button.className = 'btn-create-fix-node';
