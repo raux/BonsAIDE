@@ -391,7 +391,7 @@ Return ONLY valid JSON with this exact shape:
               "bugLocation": "file/path:line-range and why this is likely relevant",
               "fixIdea": "concrete change to make",
               "potentialMethod": "function/class/method/identifier to edit or add",
-              "sourceCodeSketch": "small illustrative code sketch, patch fragment, or pseudocode",
+              "sourceCodeSketch": "source code only: include necessary imports/libraries plus the relevant surrounding snippet or patch fragment",
               "tests": ["specific regression/unit/manual check"]
             }
           ]
@@ -407,6 +407,7 @@ Requirements:
 - Each implementation must be meaningfully different from the other implementation in the same alternative.
 - Each implementation must be a todo/checklist-style plan with 2 to 5 todos.
 - Each todo must include bugLocation, fixIdea, potentialMethod, sourceCodeSketch, and tests.
+- Each sourceCodeSketch must contain source code only, including necessary imports/libraries and the relevant snippet or surrounding code to edit; do not put Markdown or prose in sourceCodeSketch.
 - Prefer concrete bug locations from the provided snippets.
 - Make the alternatives meaningfully different, e.g. minimal guard, refactor/state-machine fix, defensive validation/observability fix.
 - Do not claim you executed the repository.
@@ -435,13 +436,19 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function stripCodeFence(value: string): string {
+  const trimmed = value.trim();
+  const fenced = trimmed.match(/^```[^\n]*\n([\s\S]*?)\n?```$/);
+  return (fenced?.[1] || trimmed).trim();
+}
+
 function coerceFixTodo(value: unknown): FixTodo {
   const todo = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
   return {
     bugLocation: stringValue(todo.bugLocation),
     fixIdea: stringValue(todo.fixIdea),
     potentialMethod: stringValue(todo.potentialMethod),
-    sourceCodeSketch: stringValue(todo.sourceCodeSketch),
+    sourceCodeSketch: stripCodeFence(stringValue(todo.sourceCodeSketch)),
     tests: stringArray(todo.tests),
   };
 }
@@ -518,6 +525,16 @@ export function formatFixAlternativeAsMarkdown(alternative: FixAlternative, inde
 
 export function formatFixAlternativesAsMarkdown(alternatives: FixAlternative[]): string {
   return alternatives.map((alternative, index) => formatFixAlternativeAsMarkdown(alternative, index)).join('\n\n');
+}
+
+export function formatFixAlternativeAsSourceCode(alternative: FixAlternative): string {
+  const implementations = alternative.implementations.length > 0
+    ? alternative.implementations
+    : [{ title: 'Implementation 1', summary: '', todos: alternative.todos }];
+  const sketches = implementations.flatMap(implementation => implementation.todos)
+    .map(todo => stripCodeFence(todo.sourceCodeSketch))
+    .filter(Boolean);
+  return sketches.join('\n\n').trim() || '// Source-code sketch not provided';
 }
 
 async function generateFixAlternatives(analysis: RepoIssueAnalysis): Promise<FixAlternative[]> {
@@ -995,11 +1012,11 @@ async function handleMessage(message: any): Promise<void> {
       const parent = parentId == null ? undefined : branch.nodes.find(n => n.id === parentId);
       if (parent) { parent.isLeaf = false; }
 
-      const markdown = formatFixAlternativeAsMarkdown(alternative, 0);
+      const sourceCode = formatFixAlternativeAsSourceCode(alternative);
       const node: CodeNode = {
         id: ++currentId,
         prompt: `Fix alternative: ${alternative.title}`,
-        code: markdown,
+        code: sourceCode,
         parentId,
         children: [],
         durationMs: 0,
@@ -1019,7 +1036,7 @@ async function handleMessage(message: any): Promise<void> {
       selectedNodeId = node.id;
       broadcast({ command: 'historyUpdate', history: branch.nodes });
       broadcast({ command: 'renderGraph', graph: createGraphFromBranch(branch) });
-      broadcast({ command: 'setInitialCode', code: markdown });
+      broadcast({ command: 'setInitialCode', code: sourceCode });
       broadcast({ command: 'createFixAlternativeNodeResult', success: true, message: `Created Bonsai node #${node.id} from ${alternative.title}.`, node });
     } catch (err: any) {
       bonsaiLog('Fix alternative node creation failed:', err?.message || err);

@@ -4,6 +4,7 @@ import {
   buildFixAlternativesPrompt,
   buildIssueLocationHypothesisPrompt,
   buildRepoIssueSnippetNodes,
+  formatFixAlternativeAsSourceCode,
   formatFixAlternativesAsMarkdown,
   parseFixAlternatives,
   parseIssueLocationHypothesis,
@@ -75,6 +76,8 @@ test('fix alternatives prompt asks for exactly two JSON todo plans', () => {
   assert.match(prompt, /"implementations"/);
   assert.match(prompt, /"bugLocation"/);
   assert.match(prompt, /"sourceCodeSketch"/);
+  assert.match(prompt, /imports\/libraries/);
+  assert.match(prompt, /source code only/);
   assert.match(prompt, /Auto-unload restore can leave Parakeet/);
 });
 
@@ -90,7 +93,7 @@ test('parseFixAlternatives parses implementation options and formats markdown', 
           bugLocation: 'TypeWhisper/Services/File1.swift:10-14',
           fixIdea: 'Check model state after restore timeout.',
           potentialMethod: 'restoreModel',
-          sourceCodeSketch: 'if model == nil { reloadModel() }',
+          sourceCodeSketch: 'import Foundation\n\nif model == nil { reloadModel() }',
           tests: ['restore timeout regression'],
         }],
       }, {
@@ -100,7 +103,7 @@ test('parseFixAlternatives parses implementation options and formats markdown', 
           bugLocation: 'TypeWhisper/Services/File1.swift:16-22',
           fixIdea: 'Wrap restore with a bounded retry helper.',
           potentialMethod: 'restoreWithRetry',
-          sourceCodeSketch: 'try await restoreWithRetry()',
+          sourceCodeSketch: 'import Foundation\n\ntry await restoreWithRetry()',
           tests: ['retry helper regression'],
         }],
       }],
@@ -118,6 +121,12 @@ test('parseFixAlternatives parses implementation options and formats markdown', 
   assert.match(markdown, /### Implementation 2: Helper retry wrapper/);
   assert.match(markdown, /Bug location: TypeWhisper\/Services\/File1\.swift:10-14/);
   assert.match(markdown, /retry helper regression/);
+  const sourceCode = formatFixAlternativeAsSourceCode(alternatives[0]);
+  assert.match(sourceCode, /import Foundation/);
+  assert.match(sourceCode, /if model == nil \{ reloadModel\(\) \}/);
+  assert.match(sourceCode, /try await restoreWithRetry\(\)/);
+  assert.doesNotMatch(sourceCode, /## Alternative/);
+  assert.doesNotMatch(sourceCode, /Bug location:/);
 });
 
 test('agentic repo analysis creates one Bonsai node per impacted snippet', () => {
