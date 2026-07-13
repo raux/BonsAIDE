@@ -50,7 +50,7 @@ test('parseIssueLocationHypothesis parses fenced model JSON defensively', () => 
   assert.deepEqual(parsed.searchSignals, ['No model loaded']);
 });
 
-test('fix alternatives prompt asks for exactly two JSON todo plans', () => {
+test('fix alternatives prompt asks for exactly four clone-specific JSON plans', () => {
   const prompt = buildFixAlternativesPrompt({
     owner: 'TypeWhisper',
     repo: 'typewhisper-mac',
@@ -70,8 +70,10 @@ test('fix alternatives prompt asks for exactly two JSON todo plans', () => {
     },
   });
 
-  assert.match(prompt, /propose exactly 2 alternative fix plans/);
-  assert.match(prompt, /Each alternative must contain exactly 2 implementation options/);
+  assert.match(prompt, /propose exactly 4 distinct fix plans/);
+  assert.match(prompt, /Each alternative must contain exactly 1 implementation option/);
+  assert.match(prompt, /isolated repository clone/);
+  assert.match(prompt, /built and tested independently/);
   assert.match(prompt, /"alternatives"/);
   assert.match(prompt, /"implementations"/);
   assert.match(prompt, /"bugLocation"/);
@@ -81,7 +83,7 @@ test('fix alternatives prompt asks for exactly two JSON todo plans', () => {
   assert.match(prompt, /Auto-unload restore can leave Parakeet/);
 });
 
-test('parseFixAlternatives parses implementation options and formats markdown', () => {
+test('parseFixAlternatives normalizes one implementation per clone plan and formats markdown', () => {
   const alternatives = parseFixAlternatives(JSON.stringify({
     alternatives: [{
       title: 'Minimal guard',
@@ -112,19 +114,19 @@ test('parseFixAlternatives parses implementation options and formats markdown', 
 
   assert.equal(alternatives.length, 1);
   assert.equal(alternatives[0].title, 'Minimal guard');
-  assert.equal(alternatives[0].implementations.length, 2);
+  assert.equal(alternatives[0].implementations.length, 1);
   assert.equal(alternatives[0].implementations[0].todos[0].potentialMethod, 'restoreModel');
-  assert.equal(alternatives[0].todos.length, 2);
+  assert.equal(alternatives[0].todos.length, 1);
   const markdown = formatFixAlternativesAsMarkdown(alternatives);
   assert.match(markdown, /## Alternative 1: Minimal guard/);
   assert.match(markdown, /### Implementation 1: Inline state guard/);
-  assert.match(markdown, /### Implementation 2: Helper retry wrapper/);
+  assert.doesNotMatch(markdown, /### Implementation 2: Helper retry wrapper/);
   assert.match(markdown, /Bug location: TypeWhisper\/Services\/File1\.swift:10-14/);
-  assert.match(markdown, /retry helper regression/);
+  assert.doesNotMatch(markdown, /retry helper regression/);
   const sourceCode = formatFixAlternativeAsSourceCode(alternatives[0]);
   assert.match(sourceCode, /import Foundation/);
   assert.match(sourceCode, /if model == nil \{ reloadModel\(\) \}/);
-  assert.match(sourceCode, /try await restoreWithRetry\(\)/);
+  assert.doesNotMatch(sourceCode, /try await restoreWithRetry\(\)/);
   assert.doesNotMatch(sourceCode, /## Alternative/);
   assert.doesNotMatch(sourceCode, /Bug location:/);
 });

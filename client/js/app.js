@@ -176,6 +176,8 @@ document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', functi
     var repoUrl = document.getElementById('githubRepoUrl').value || '';
     var issue = currentSelectedIssue();
     var statusEl = document.getElementById('repoAnalysisStatus');
+    var instructionsEl = document.getElementById('codeGenerationInstructions');
+    var generationInstructions = instructionsEl ? instructionsEl.value : '';
 
     if (!repoUrl.trim() || !issue) {
         if (statusEl) {
@@ -201,7 +203,8 @@ document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', functi
         command: 'analyzeRepoForFix',
         repoUrl: repoUrl,
         issue: issue,
-        model: modelId
+        model: modelId,
+        generationInstructions: generationInstructions
     });
 });
 
@@ -215,10 +218,13 @@ var analysisLogStartTime = 0;
 var DEFAULT_ANALYSIS_CHECKLIST = [
     'Validate GitHub URL',
     'Rephrase issue into search signals',
-    'Clone/update repository',
+    'Clone/update source repository',
     'Identify potential bug locations',
-    'Draft 2 fix-plan alternatives',
-    'Display fix-plan todo cards'
+    'Draft 4 fix-plan alternatives',
+    'Create 4 isolated repository clones',
+    'Generate and apply 4 fixes',
+    'Run build and tests in each clone',
+    'Display 4 validated fix candidates'
 ];
 var analysisChecklistState = [];
 var latestFixAlternatives = [];
@@ -432,6 +438,21 @@ function renderFixAlternatives(alternatives, context) {
             summaryP.className = 'fix-alternative-summary';
             summaryP.textContent = alternative.summary;
             card.appendChild(summaryP);
+        }
+
+        if (alternative.execution) {
+            var execution = alternative.execution;
+            var executionBox = document.createElement('div');
+            executionBox.className = 'fix-execution-summary status-' + String(execution.status || 'unknown').toLowerCase();
+            appendTextRow(executionBox, 'Candidate status', execution.status);
+            appendTextRow(executionBox, 'Isolated clone', execution.workspacePath);
+            appendTextRow(executionBox, 'Changed files', Array.isArray(execution.changedFiles) ? execution.changedFiles.join('\n') : '');
+            appendTextRow(executionBox, 'Build', execution.build ? execution.build.status + ' — ' + execution.build.displayCommand : 'unavailable');
+            appendTextRow(executionBox, 'Tests', execution.test ? execution.test.status + ' — ' + execution.test.displayCommand : 'unavailable');
+            appendTextRow(executionBox, 'Diff', execution.diffPath);
+            appendTextRow(executionBox, 'Report', execution.reportPath);
+            appendTextRow(executionBox, 'Error', execution.error);
+            card.appendChild(executionBox);
         }
 
         var implementations = Array.isArray(alternative.implementations) && alternative.implementations.length

@@ -42,15 +42,17 @@
         <div class="issue-detail-panel">
             <div class="issue-detail-header">
                 <h3 id="selectedIssueTitle">Select an issue</h3>
-                <button id="btnAnalyzeRepoForFix" disabled title="Clone/read the repository and gather static code context for the selected issue">Analyze Repo for Fix</button>
+                <button id="btnAnalyzeRepoForFix" disabled title="Create four isolated clones, generate four fixes, and run each repository's detected build and test commands">Analyze Repo for Fix</button>
             </div>
             <div id="selectedIssueMeta" class="issue-meta"></div>
             <pre id="selectedIssueBody" class="issue-body">Collect issues, then select one to view its description.</pre>
+            <label for="codeGenerationInstructions"><strong>Code generation instructions</strong></label>
+            <textarea id="codeGenerationInstructions" rows="4" placeholder="Optional constraints shared by all four clones: permitted files/APIs, coding style, required tests, dependencies to avoid, compatibility requirements..."></textarea>
             <div id="repoAnalysisStatus" class="issue-analysis-status" aria-live="polite"></div>
         </div>
         <div id="fixAlternativesPanel" class="fix-alternatives-panel" style="display:none;">
             <div class="fix-alternatives-header">
-                <h3>Fix Alternatives</h3>
+                <h3>Four Isolated Fix Candidates</h3>
                 <span id="fixAlternativesSummary" class="fix-alternatives-summary"></span>
             </div>
             <div id="fixAlternativesCards" class="fix-alternatives-cards" aria-live="polite"></div>

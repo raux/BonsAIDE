@@ -25,6 +25,18 @@ import { computeLeafSimilaritiesForCode, SimilarityBranch, SimilarityNode } from
 import { analyzeCodeWithLizardServer } from './lizard-server';
 import { Branch, CodeNode, LizardMetrics, createGraphFromBranch, importBonsaiPayload, trimBranchAtNode } from './bonsai-state';
 import { analyzeRepoForIssue, writeFixSpecFile, IssueLocationHypothesis, RepoIssueAnalysis } from './repo-analyzer';
+import {
+  FIX_CANDIDATE_COUNT,
+  FixCandidateReport,
+  applyGeneratedFix,
+  buildFixGenerationPrompt,
+  collectFixContext,
+  finalizeCandidateReport,
+  parseGeneratedFix,
+  prepareFourFixClones,
+  unavailableValidation,
+  validateFixWorkspace,
+} from './fix-workspaces';
 import { discoverPiModels } from './pi-models';
 import { generateViaSubscription, promptViaPiModel } from './pi-subscription-rpc';
 import { formatGitHubIssues, GitHubIssueForDisplay, mimeType, parseGitHubUrl } from './server-utils';
@@ -347,6 +359,7 @@ export interface FixAlternative {
   summary: string;
   implementations: FixImplementation[];
   todos: FixTodo[];
+  execution?: FixCandidateReport;
 }
 
 function snippetContextForPrompt(analysis: RepoIssueAnalysis): string {
@@ -372,9 +385,9 @@ function issueInterpretationForPrompt(analysis: RepoIssueAnalysis): string {
   ].join('\n') : '(Issue rephrasing was unavailable; fallback search signals were used.)';
 }
 
-export function buildFixAlternativesPrompt(analysis: RepoIssueAnalysis): string {
+export function buildFixAlternativesPrompt(analysis: RepoIssueAnalysis, generationInstructions = ''): string {
   return `
-You are a senior software-maintenance agent. Given a GitHub issue, issue interpretation, and statically gathered repository snippets, propose exactly 2 alternative fix plans.
+You are a senior software-maintenance agent. Given a GitHub issue, issue interpretation, and statically gathered repository snippets, propose exactly 4 distinct fix plans. Each plan will be implemented in its own isolated repository clone, then built and tested independently.
 
 Return ONLY valid JSON with this exact shape:
 {
@@ -402,9 +415,8 @@ Return ONLY valid JSON with this exact shape:
 }
 
 Requirements:
-- Provide exactly 2 alternatives.
-- Each alternative must contain exactly 2 implementation options.
-- Each implementation must be meaningfully different from the other implementation in the same alternative.
+- Provide exactly 4 alternatives: minimal/localized, structural/refactoring, defensive/validation, and a meaningfully different fourth approach.
+- Each alternative must contain exactly 1 implementation option because each alternative maps to one isolated clone.
 - Each implementation must be a todo/checklist-style plan with 2 to 5 todos.
 - Each todo must include bugLocation, fixIdea, potentialMethod, sourceCodeSketch, and tests.
 - Each sourceCodeSketch must contain source code only, including necessary imports/libraries and the relevant snippet or surrounding code to edit; do not put Markdown or prose in sourceCodeSketch.
@@ -426,6 +438,9 @@ ${issueInterpretationForPrompt(analysis)}
 
 Context search signals:
 ${analysis.keywords.join(', ') || '(none)'}
+
+User-specified code generation instructions:
+${generationInstructions.trim() || '(none supplied)'}
 
 Potential bug-location snippets:
 ${snippetContextForPrompt(analysis) || '(No matching snippets found.)'}
@@ -464,7 +479,7 @@ function coerceFixAlternative(value: unknown, index = 0): FixAlternative {
     .map(coerceFixTodo)
     .filter(hasFixTodoContent);
   const rawImplementations = Array.isArray(raw.implementations) ? raw.implementations : [];
-  const implementations = rawImplementations.slice(0, 2).map((implementationValue, implementationIndex): FixImplementation => {
+  const implementations = rawImplementations.slice(0, 1).map((implementationValue, implementationIndex): FixImplementation => {
     const implementation = (implementationValue && typeof implementationValue === 'object' ? implementationValue : {}) as Record<string, unknown>;
     const rawTodos = Array.isArray(implementation.todos) ? implementation.todos : [];
     return {
@@ -490,7 +505,7 @@ export function parseFixAlternatives(raw: string): FixAlternative[] {
   const candidate = fenced || trimmed.match(/\{[\s\S]*\}/)?.[0] || trimmed;
   const parsed = JSON.parse(candidate) as Record<string, unknown>;
   const alternatives = Array.isArray(parsed.alternatives) ? parsed.alternatives : [];
-  return alternatives.slice(0, 2).map((alternative, index) => coerceFixAlternative(alternative, index));
+  return alternatives.slice(0, FIX_CANDIDATE_COUNT).map((alternative, index) => coerceFixAlternative(alternative, index));
 }
 
 export function formatFixAlternativeAsMarkdown(alternative: FixAlternative, index = 0): string {
@@ -537,15 +552,135 @@ export function formatFixAlternativeAsSourceCode(alternative: FixAlternative): s
   return sketches.join('\n\n').trim() || '// Source-code sketch not provided';
 }
 
-async function generateFixAlternatives(analysis: RepoIssueAnalysis): Promise<FixAlternative[]> {
+async function generateFixAlternatives(analysis: RepoIssueAnalysis, generationInstructions = ''): Promise<FixAlternative[]> {
   const selected = requireSelectedPiModel();
   const result = await promptViaPiModel({
     provider: selected.provider,
     modelId: selected.modelId,
-    prompt: buildFixAlternativesPrompt(analysis),
+    prompt: buildFixAlternativesPrompt(analysis, generationInstructions),
     timeoutMs: 300000
   });
   return parseFixAlternatives(result.text);
+}
+
+function candidateContextPaths(analysis: RepoIssueAnalysis): string[] {
+  const paths = analysis.snippets.map(snippet => snippet.file);
+  if (analysis.locationHypothesis) {
+    paths.push(...analysis.locationHypothesis.likelyFiles);
+  }
+  // Include common agent/build manifests so code generation respects repository
+  // conventions and can create tests compatible with the detected toolchain.
+  paths.push(
+    'AGENTS.md', 'README.md', 'package.json', 'tsconfig.json',
+    'pyproject.toml', 'setup.py', 'pytest.ini',
+    'Cargo.toml', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts'
+  );
+  return Array.from(new Set(paths.filter(Boolean)));
+}
+
+function formatCandidateExecutionSummary(alternatives: FixAlternative[]): string {
+  const lines = ['# Four-clone implementation results', ''];
+  alternatives.forEach((alternative, index) => {
+    const execution = alternative.execution;
+    lines.push(`## Clone ${index + 1}: ${alternative.title}`);
+    if (!execution) {
+      lines.push('- Status: FAIL', '- No execution report was produced.', '');
+      return;
+    }
+    lines.push(`- Status: ${execution.status}`);
+    lines.push(`- Workspace: ${execution.workspacePath}`);
+    lines.push(`- Changed files: ${execution.changedFiles.join(', ') || '(none)'}`);
+    lines.push(`- Build: ${execution.build.status} (${execution.build.displayCommand})`);
+    lines.push(`- Tests: ${execution.test.status} (${execution.test.displayCommand})`);
+    lines.push(`- Report: ${execution.reportPath}`);
+    if (execution.error) { lines.push(`- Error: ${execution.error}`); }
+    lines.push('');
+  });
+  return lines.join('\n').trimEnd();
+}
+
+async function implementFourFixCandidates(
+  analysis: RepoIssueAnalysis,
+  alternatives: FixAlternative[],
+  generationInstructions: string,
+  onProgress: (phase: 'clones' | 'generate' | 'generated' | 'validate' | 'validated', candidate: number, detail: string) => void
+): Promise<FixAlternative[]> {
+  if (alternatives.length !== FIX_CANDIDATE_COUNT) {
+    throw new Error(`Expected exactly ${FIX_CANDIDATE_COUNT} fix alternatives, received ${alternatives.length}.`);
+  }
+  const selected = requireSelectedPiModel();
+  const clones = await prepareFourFixClones(
+    analysis.repoPath,
+    analysis.owner,
+    analysis.repo,
+    analysis.issue.number
+  );
+  onProgress('clones', 0, `${clones.length} isolated clones ready`);
+  const context = collectFixContext(analysis.repoPath, candidateContextPaths(analysis));
+  const generatedStates: Array<{ changedFiles: string[]; summary: string; error: string }> = [];
+
+  for (let index = 0; index < FIX_CANDIDATE_COUNT; index += 1) {
+    const candidate = index + 1;
+    const alternative = alternatives[index];
+    const workspacePath = clones[index];
+    const state = { changedFiles: [] as string[], summary: '', error: '' };
+    try {
+      onProgress('generate', candidate, `Generating candidate ${candidate}/${FIX_CANDIDATE_COUNT}: ${alternative.title}`);
+      const generatedResponse = await promptViaPiModel({
+        provider: selected.provider,
+        modelId: selected.modelId,
+        prompt: buildFixGenerationPrompt({
+          owner: analysis.owner,
+          repo: analysis.repo,
+          issueNumber: analysis.issue.number,
+          issueTitle: analysis.issue.title,
+          issueBody: analysis.issue.body || '',
+          candidate,
+          plan: alternative,
+          fileContext: context,
+          generationInstructions,
+        }),
+        timeoutMs: 600000,
+      });
+      const generatedFix = parseGeneratedFix(generatedResponse.text);
+      state.changedFiles = await applyGeneratedFix(workspacePath, generatedFix);
+      state.summary = generatedFix.summary;
+    } catch (error: any) {
+      state.error = `Code generation/application failed: ${error?.message || error}`;
+      bonsaiLog(`Candidate ${candidate} generation failed:`, state.error);
+    }
+    generatedStates.push(state);
+    onProgress('generated', candidate, state.error || `Candidate ${candidate}/${FIX_CANDIDATE_COUNT} applied (${state.changedFiles.length} file(s))`);
+  }
+
+  for (let index = 0; index < FIX_CANDIDATE_COUNT; index += 1) {
+    const candidate = index + 1;
+    const alternative = alternatives[index];
+    const workspacePath = clones[index];
+    const state = generatedStates[index];
+    let validation;
+    if (state.error) {
+      validation = {
+        setup: unavailableValidation('setup', state.error),
+        build: unavailableValidation('build', state.error),
+        test: unavailableValidation('test', state.error),
+      };
+    } else {
+      onProgress('validate', candidate, `Running setup, build, and tests for candidate ${candidate}/${FIX_CANDIDATE_COUNT}`);
+      validation = await validateFixWorkspace(workspacePath);
+    }
+    alternative.execution = await finalizeCandidateReport({
+      candidate,
+      title: alternative.title,
+      workspacePath,
+      changedFiles: state.changedFiles,
+      generationSummary: state.summary,
+      validation,
+      error: state.error || undefined,
+    });
+    onProgress('validated', candidate, `Candidate ${candidate}/${FIX_CANDIDATE_COUNT}: ${alternative.execution.status} (build ${alternative.execution.build.status}, tests ${alternative.execution.test.status})`);
+  }
+  return alternatives;
 }
 
 export function buildRepoIssueSnippetNodes(
@@ -1083,9 +1218,12 @@ async function handleMessage(message: any): Promise<void> {
   if (message.command === 'analyzeRepoForFix') {
     const repoUrl = message.repoUrl || '';
     const issue = message.issue as GitHubIssueForDisplay | undefined;
+    const generationInstructions = typeof message.generationInstructions === 'string'
+      ? message.generationInstructions.trim().slice(0, 8000)
+      : '';
     LLMmodel = message.model || LLMmodel;
 
-    bonsaiLog('Analyzing repo for fix:', repoUrl, issue?.number, 'Pi model:', LLMmodel || '(none)');
+    bonsaiLog('Analyzing repo for fix:', repoUrl, issue?.number, 'Pi model:', LLMmodel || '(none)', 'custom generation instructions:', generationInstructions ? 'yes' : 'no');
     broadcast({ command: 'repoIssueAnalysisResult', success: false, loading: true, message: 'Preparing repository analysis...' });
 
     try {
@@ -1138,28 +1276,56 @@ async function handleMessage(message: any): Promise<void> {
         throw new Error('No impacted snippets found for the selected issue.');
       }
 
-      // Step 5: Drafting 2 model-assisted fix-plan alternatives and updating the spec file
+      // Step 5: Draft four distinct model-assisted plans, one per isolated clone.
       stepIndex++;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Drafting 2 fix-plan alternatives', status: 'running' });
-      const fixAlternatives = await generateFixAlternatives(analysis);
-      if (fixAlternatives.length === 0) {
-        throw new Error('The selected Pi model did not return any fix alternatives.');
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Drafting 4 fix-plan alternatives', status: 'running' });
+      let fixAlternatives = await generateFixAlternatives(analysis, generationInstructions);
+      if (fixAlternatives.length !== FIX_CANDIDATE_COUNT) {
+        throw new Error(`The selected Pi model returned ${fixAlternatives.length} fix alternatives; exactly ${FIX_CANDIDATE_COUNT} are required.`);
       }
       analysis.agenticAnalysis = formatFixAlternativesAsMarkdown(fixAlternatives);
       analysis.specPath = await writeFixSpecFile(analysis);
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${fixAlternatives.length} alternative(s). Spec: ${analysis.specPath}` });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${fixAlternatives.length} alternatives. Initial spec: ${analysis.specPath}` });
 
-      // Step 6: Displaying fix-plan todo cards instead of creating snippet nodes
+      // Steps 6-8: create four clones, generate/apply each fix, then build/test each clone.
+      const cloneStep = ++stepIndex;
+      const generationStep = ++stepIndex;
+      const validationStep = ++stepIndex;
+      broadcast({ command: 'analysisLogStep', stepIndex: cloneStep, action: 'add', stepName: 'Creating 4 isolated repository clones', status: 'running' });
+      broadcast({ command: 'analysisLogStep', stepIndex: generationStep, action: 'add', stepName: 'Generating and applying 4 fixes', status: 'pending' });
+      broadcast({ command: 'analysisLogStep', stepIndex: validationStep, action: 'add', stepName: 'Running build and tests in each clone', status: 'pending' });
+      fixAlternatives = await implementFourFixCandidates(analysis, fixAlternatives, generationInstructions, (phase, candidate, detail) => {
+        if (phase === 'clones') {
+          broadcast({ command: 'analysisLogStep', stepIndex: cloneStep, action: 'update', status: 'completed', detail });
+          broadcast({ command: 'analysisLogStep', stepIndex: generationStep, action: 'update', status: 'running', detail: 'Starting candidate 1/4' });
+        } else if (phase === 'generate' || phase === 'generated') {
+          const complete = phase === 'generated' && candidate === FIX_CANDIDATE_COUNT;
+          broadcast({ command: 'analysisLogStep', stepIndex: generationStep, action: 'update', status: complete ? 'completed' : 'running', detail });
+        } else {
+          const complete = phase === 'validated' && candidate === FIX_CANDIDATE_COUNT;
+          broadcast({ command: 'analysisLogStep', stepIndex: validationStep, action: 'update', status: complete ? 'completed' : 'running', detail });
+        }
+      });
+
+      analysis.agenticAnalysis = [
+        ...(generationInstructions ? ['# User code generation instructions', '', generationInstructions, ''] : []),
+        formatFixAlternativesAsMarkdown(fixAlternatives),
+        '',
+        formatCandidateExecutionSummary(fixAlternatives),
+      ].join('\n');
+      analysis.specPath = await writeFixSpecFile(analysis);
+
+      // Step 9: Display fix plans with workspace/build/test reports.
       stepIndex++;
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Displaying fix-plan todo cards', status: 'running' });
-      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${fixAlternatives.length} card(s) ready` });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Displaying 4 validated fix candidates', status: 'running' });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${fixAlternatives.length} candidate report(s) ready` });
 
       broadcast({ command: 'setInitialCode', code: analysis.agenticAnalysis });
       broadcast({
         command: 'repoIssueAnalysisResult',
         success: true,
         loading: false,
-        message: `Prepared ${fixAlternatives.length} fix alternative todo list(s) for issue #${issue.number}.`,
+        message: `Implemented ${fixAlternatives.length} isolated fix candidates for issue #${issue.number}; build/test reports are attached.`,
         fixAlternatives,
         snippets: analysis.snippets,
         keywords: analysis.keywords,
@@ -1168,7 +1334,7 @@ async function handleMessage(message: any): Promise<void> {
         specPath: analysis.specPath,
         repository: `${parsed.owner}/${parsed.repo}`
       });
-      bonsaiLog('Repo issue fix alternatives created:', fixAlternatives.length, 'snippets:', analysis.snippets.length);
+      bonsaiLog('Repo issue fix candidates implemented:', fixAlternatives.length, 'snippets:', analysis.snippets.length);
     } catch (err: any) {
       bonsaiLog('Repo issue analysis failed:', err?.message || err);
       broadcast({ command: 'analysisLogStep', action: 'error', detail: err?.message || 'Unknown error' });

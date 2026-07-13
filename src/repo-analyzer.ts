@@ -379,9 +379,10 @@ export function formatFixSpecification(analysis: RepoIssueAnalysis): string {
   lines.push('');
   lines.push('## Agentic analysis method');
   lines.push('- The repository was cloned or fast-forward updated into the local repo cache.');
-  lines.push('- No repository code was executed. No dependencies were installed.');
+  lines.push('- The initial location-analysis phase did not execute repository code or install dependencies.');
   lines.push('- Relevant snippets were gathered with issue rephrasing, location hypotheses, and static repository scanning as context.');
-  lines.push('- A Pi-selected model can review the issue and snippets to draft a root-cause hypothesis, concrete fix steps, and test plan when agentic analysis is attached.');
+  lines.push('- When four-clone candidate results are attached below, dependency setup, build, and test commands were subsequently executed only inside those isolated clones.');
+  lines.push('- A Pi-selected model reviews the issue and snippets to draft root-cause hypotheses, concrete fix steps, and test plans.');
   lines.push('');
   if (analysis.locationHypothesis) {
     lines.push(...formatIssueLocationHypothesis(analysis.locationHypothesis));

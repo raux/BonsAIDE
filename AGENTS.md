@@ -18,6 +18,7 @@ The legacy VS Code extension implementation may still exist in the repository fo
 | `client/css/styles.css` | Browser UI styles |
 | `src/similarity.ts` | Pure TF-IDF cosine-similarity utilities with no server/UI dependency |
 | `src/lizard-server.ts` | Standalone wrapper around the Python `lizard` package for code-complexity metrics |
+| `src/fix-workspaces.ts` | Four-clone fix workspaces, safe generated-file application, build/test command detection, validation logs, and candidate reports |
 | `tsconfig.server.json` | Active TypeScript build config for the standalone server |
 | `package.json` | npm scripts and development dependencies |
 | `README.md` | End-user setup and usage guide |
@@ -94,6 +95,7 @@ Use `pi /login <provider>` to configure provider credentials in `~/.pi/agent/aut
 - Exposes JSON session export/import through `/export` and `/import`.
 - Calls Pi AgentSession for code generation and Agent.md workflows.
 - Uses `src/similarity.ts` for leaf-code similarity and `src/lizard-server.ts` for optional metrics.
+- Uses `src/fix-workspaces.ts` to create four isolated clones, apply one generated fix per clone, run detected builds/tests, and persist comparison reports.
 
 ### Browser side (`client/`)
 
@@ -188,6 +190,8 @@ The existing `src/test/extension.test.ts` is legacy VS Code sample material and 
 - Treat all imported JSON, LLM responses, GitHub-fetched content, and UI text fields as untrusted input.
 - Escape dynamic text before placing it in frontend HTML.
 - Be careful with local-server exposure: endpoints such as `/message` can trigger LLM work and state changes.
+- `Analyze Repo for Fix` executes detected dependency, build, and test commands inside four isolated clones. Treat repository scripts as executable code and only analyze trusted repositories.
+- Generated paths must remain relative and may not target `.git`, `node_modules`, or escape a candidate workspace. Never weaken these checks.
 - Do not hard-code API keys, external credentials, or private repository data.
 - If adding remote fetches or new endpoints, set explicit timeouts and validate input sizes.
 
@@ -196,6 +200,7 @@ The existing `src/test/extension.test.ts` is legacy VS Code sample material and 
 ## Dependency and Artifact Hygiene
 
 - `node_modules/`, `out-server/`, `dist/`, `out/`, and generated packages are ignored build/dependency outputs.
+- Four-clone runs belong under `artifacts/repo-fix-workspaces/`; per-candidate logs and diffs belong under each clone's `.bonsai-reports/` folder.
 - Do not commit generated server output from `out-server/`.
 - Keep experimental or generated research outputs under `artifacts/` unless the user asks to promote them.
 - Avoid committing `.DS_Store` or other local environment files.

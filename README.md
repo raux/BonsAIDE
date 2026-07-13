@@ -78,6 +78,21 @@ The selected value must use Pi's `pi:<provider>:<model-id>` format.
 
 ![Agent.md loaded state](other/bonsaide-after-load-agent-md.png)
 
+## Four-clone repository fixing
+
+The **Analyze Repo for Fix** workflow can implement one selected GitHub issue four different ways:
+
+1. Enter a GitHub repository URL, collect issues, and select one issue.
+2. Optionally enter shared **Code generation instructions** (allowed files/APIs, style, compatibility, dependencies to avoid, and required tests).
+3. Select a Pi model and click **Analyze Repo for Fix**.
+4. BonsAIDE statically locates likely impacted files and drafts exactly four distinct plans.
+5. It creates four isolated clones under `artifacts/repo-fix-workspaces/<owner>__<repo>/issue-<n>/clone-1..4/`.
+6. The selected model generates and applies one plan in each clone. The source cache is never modified.
+7. BonsAIDE detects and runs dependency setup, build, and test commands separately in each clone. Build and tests are both attempted and logged.
+8. The UI reports `PASS`, `PARTIAL`, or `FAIL`, changed files, clone path, diff, and report path for each candidate.
+
+Reports and logs are stored in each clone's `.bonsai-reports/` folder. Nothing is pushed, merged, or committed automatically. Build and test scripts execute repository code, so analyze only repositories you trust.
+
 ---
 
 ## UI Rearrangement & Interactivity Ideas

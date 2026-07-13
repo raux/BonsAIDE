@@ -13,6 +13,7 @@
     "src/server.ts",
     "src/bonsai-state.ts",
     "src/repo-analyzer.ts",
+    "src/fix-workspaces.ts",
     "src/server-utils.ts",
     "src/pi-models.ts",
     "src/pi-subscription-rpc.ts",

@@ -306,6 +306,16 @@ textarea {
 
 .swatch.repo_issue_analysis { background: #b45309; }
 
+#codeGenerationInstructions {
+    display: block;
+    width: 100%;
+    margin-top: 5px;
+    padding: 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    resize: vertical;
+}
+
 /* ---- Fix alternatives ------------------------------------ */
 .fix-alternatives-panel {
     grid-column: 1 / -1;
@@ -369,6 +379,31 @@ textarea {
     font-size: 13px;
     line-height: 1.4;
 }
+
+.fix-execution-summary {
+    margin: 10px 0;
+    padding: 9px;
+    border: 1px solid #d1d5db;
+    border-left-width: 5px;
+    border-radius: 7px;
+    background: #f8fafc;
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.fix-execution-summary.status-pass { border-left-color: #15803d; background: #f0fdf4; }
+.fix-execution-summary.status-partial { border-left-color: #b45309; background: #fffbeb; }
+.fix-execution-summary.status-fail { border-left-color: #b91c1c; background: #fef2f2; }
+
+.fix-execution-summary label {
+    display: block;
+    margin-top: 5px;
+    font-weight: 700;
+    color: #374151;
+}
+
+.fix-execution-summary label:first-child { margin-top: 0; }
 
 .fix-implementation {
     border: 1px solid #fde6c8;

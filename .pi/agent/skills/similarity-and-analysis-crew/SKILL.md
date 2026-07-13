@@ -560,6 +560,23 @@ test('safeRepoCacheName sanitizes unsafe chars', () => {
 
 ---
 
+## Four-Clone Fix Implementation and Validation
+
+`src/fix-workspaces.ts` extends static issue analysis into four isolated implementations:
+
+1. Keep the shared checkout under `artifacts/repo-cache/` read-only for implementation purposes.
+2. Create exactly four local clones under `artifacts/repo-fix-workspaces/<owner>__<repo>/issue-<n>/clone-1..4/`.
+3. Generate one distinct complete-file fix per plan. Reject absolute paths, `..`, `.git`, `node_modules`, excessive file counts, and oversized generated files.
+4. Apply each candidate only within its own clone.
+5. Detect setup/build/test commands for supported ecosystems without using a shell.
+6. Run build and test independently for every successfully generated candidate; attempt tests even when the build fails.
+7. Persist `build.log`, `test.log`, `changes.diff`, `report.md`, and `report.json` under `.bonsai-reports/`.
+8. Report `PASS` only when both build and tests pass; `FAIL` for a failed build/test or generation error; otherwise `PARTIAL`.
+
+Primary tests: `test/fix-workspaces.test.mjs`. Never make the source cache writable as the implementation target, and never push or merge automatically.
+
+---
+
 ## Error Handling & Graceful Degradation
 
 ### Similarity
