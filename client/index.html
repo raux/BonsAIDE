@@ -42,13 +42,23 @@
         <div class="issue-detail-panel">
             <div class="issue-detail-header">
                 <h3 id="selectedIssueTitle">Select an issue</h3>
-                <button id="btnAnalyzeRepoForFix" disabled title="Create four isolated clones, generate four fixes, and run each repository's detected build and test commands">Analyze Repo for Fix</button>
+                <div class="issue-action-buttons">
+                    <button id="btnReproduceRepoIssue" disabled title="Create one isolated clone, establish a passing baseline, generate a regression test, and check whether it fails">Attempt Error Reproduction</button>
+                    <button id="btnAnalyzeRepoForFix" disabled title="Create four isolated clones, generate four fixes, and run each repository's detected build and test commands">Analyze Repo for Fix</button>
+                </div>
             </div>
             <div id="selectedIssueMeta" class="issue-meta"></div>
             <pre id="selectedIssueBody" class="issue-body">Collect issues, then select one to view its description.</pre>
-            <label for="codeGenerationInstructions"><strong>Code generation instructions</strong></label>
-            <textarea id="codeGenerationInstructions" rows="4" placeholder="Optional constraints shared by all four clones: permitted files/APIs, coding style, required tests, dependencies to avoid, compatibility requirements..."></textarea>
+            <label for="codeGenerationInstructions"><strong>Repository workflow instructions</strong></label>
+            <textarea id="codeGenerationInstructions" rows="4" placeholder="Optional constraints for fix or reproduction workflows: permitted APIs, test framework/style, dependencies to avoid, compatibility requirements..."></textarea>
             <div id="repoAnalysisStatus" class="issue-analysis-status" aria-live="polite"></div>
+        </div>
+        <div id="reproductionPanel" class="reproduction-panel" style="display:none;">
+            <div class="reproduction-header">
+                <h3>Error Reproduction Attempt</h3>
+                <span id="reproductionSummary" class="reproduction-summary"></span>
+            </div>
+            <div id="reproductionContent" class="reproduction-content" aria-live="polite"></div>
         </div>
         <div id="fixAlternativesPanel" class="fix-alternatives-panel" style="display:none;">
             <div class="fix-alternatives-header">
@@ -60,11 +70,11 @@
         <div class="analysis-sidecar">
             <div id="analysisChecklistPanel" class="analysis-checklist-panel">
                 <div class="analysis-checklist-header">
-                    <h3>Repo Analysis Checklist</h3>
+                    <h3>Repository Workflow Checklist</h3>
                     <span id="analysisChecklistProgress" class="checklist-progress">0/0 done</span>
                 </div>
                 <ol id="analysisChecklist" class="analysis-checklist" aria-live="polite">
-                    <li class="checklist-empty">Run “Analyze Repo for Fix” to see the steps.</li>
+                    <li class="checklist-empty">Run a repository workflow to see its steps.</li>
                 </ol>
             </div>
             <div id="analysisLogPanel" class="analysis-log-panel">

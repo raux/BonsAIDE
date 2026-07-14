@@ -14,6 +14,7 @@
     "src/bonsai-state.ts",
     "src/repo-analyzer.ts",
     "src/fix-workspaces.ts",
+    "src/reproduction-workspace.ts",
     "src/server-utils.ts",
     "src/pi-models.ts",
     "src/pi-subscription-rpc.ts",

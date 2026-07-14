@@ -28,6 +28,7 @@ import { analyzeRepoForIssue, writeFixSpecFile, IssueLocationHypothesis, RepoIss
 import {
   FIX_CANDIDATE_COUNT,
   FixCandidateReport,
+  ValidationResult,
   applyGeneratedFix,
   buildFixGenerationPrompt,
   collectFixContext,
@@ -38,6 +39,16 @@ import {
   validateFixWorkspace,
 } from './fix-workspaces';
 import { discoverPiModels } from './pi-models';
+import {
+  ReproductionReport,
+  buildReproductionTestPrompt,
+  discoverTestContextFiles,
+  finalizeReproductionReport,
+  parseGeneratedReproductionTest,
+  prepareReproductionClone,
+  runBaselineValidation,
+  runReproductionValidation,
+} from './reproduction-workspace';
 import { generateViaSubscription, promptViaPiModel } from './pi-subscription-rpc';
 import { formatGitHubIssues, GitHubIssueForDisplay, mimeType, parseGitHubUrl } from './server-utils';
 
@@ -576,6 +587,55 @@ function candidateContextPaths(analysis: RepoIssueAnalysis): string[] {
     'Cargo.toml', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts'
   );
   return Array.from(new Set(paths.filter(Boolean)));
+}
+
+async function generateReproductionTest(analysis: RepoIssueAnalysis, generationInstructions: string) {
+  const selected = requireSelectedPiModel();
+  const contextPaths = [
+    ...candidateContextPaths(analysis),
+    ...discoverTestContextFiles(analysis.repoPath),
+  ];
+  const fileContext = collectFixContext(analysis.repoPath, Array.from(new Set(contextPaths)));
+  const result = await promptViaPiModel({
+    provider: selected.provider,
+    modelId: selected.modelId,
+    prompt: buildReproductionTestPrompt({
+      owner: analysis.owner,
+      repo: analysis.repo,
+      issueNumber: analysis.issue.number,
+      issueTitle: analysis.issue.title,
+      issueBody: analysis.issue.body || '',
+      issueInterpretation: issueInterpretationForPrompt(analysis),
+      snippetContext: snippetContextForPrompt(analysis),
+      fileContext,
+      generationInstructions,
+    }),
+    timeoutMs: 300000,
+  });
+  return parseGeneratedReproductionTest(result.text);
+}
+
+function validationResultForClient(result: ValidationResult): ValidationResult {
+  return {
+    ...result,
+    stdout: result.stdout.slice(-20_000),
+    stderr: result.stderr.slice(-20_000),
+  };
+}
+
+function reproductionReportForClient(report: ReproductionReport) {
+  return {
+    ...report,
+    baseline: {
+      setup: report.baseline.setup ? validationResultForClient(report.baseline.setup) : undefined,
+      build: validationResultForClient(report.baseline.build),
+      test: validationResultForClient(report.baseline.test),
+    },
+    reproduction: {
+      build: validationResultForClient(report.reproduction.build),
+      test: validationResultForClient(report.reproduction.test),
+    },
+  };
 }
 
 function formatCandidateExecutionSummary(alternatives: FixAlternative[]): string {
@@ -1334,6 +1394,127 @@ async function handleMessage(message: any): Promise<void> {
         command: 'collectGitHubIssuesResult',
         success: false,
         message: err?.message || 'Issue collection failed'
+      });
+    }
+    return;
+  }
+
+  if (message.command === 'reproduceRepoIssue') {
+    const repoUrl = message.repoUrl || '';
+    const issue = message.issue as GitHubIssueForDisplay | undefined;
+    const generationInstructions = typeof message.generationInstructions === 'string'
+      ? message.generationInstructions.trim().slice(0, 8000)
+      : '';
+    LLMmodel = message.model || LLMmodel;
+
+    bonsaiLog('Attempting issue reproduction:', repoUrl, issue?.number, 'Pi model:', LLMmodel || '(none)');
+    broadcast({ command: 'repoIssueReproductionResult', success: false, loading: true, message: 'Preparing isolated reproduction attempt...' });
+
+    try {
+      let stepIndex = 0;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Validating URL and selected issue', status: 'running' });
+      const parsed = parseGitHubUrl(repoUrl);
+      if (!parsed) {
+        throw new Error('Invalid GitHub URL. Expected format: https://github.com/owner/repo');
+      }
+      if (!issue || typeof issue.title !== 'string' || typeof issue.number !== 'number') {
+        throw new Error('Select an issue before attempting reproduction.');
+      }
+      requireSelectedPiModel();
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${parsed.owner}/${parsed.repo} issue #${issue.number}` });
+
+      stepIndex++;
+      let locationHypothesis: IssueLocationHypothesis | undefined;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Interpreting failure behavior and search signals', status: 'running' });
+      try {
+        locationHypothesis = await generateIssueLocationHypothesis(issue);
+        broadcast({
+          command: 'analysisLogStep',
+          stepIndex,
+          action: 'update',
+          status: 'completed',
+          detail: locationHypothesis.rephrasedIssue || `${locationHypothesis.searchSignals.length} search signal(s)`,
+        });
+      } catch (err: any) {
+        bonsaiLog('Reproduction issue interpretation failed; using static terms:', err?.message || err);
+        broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: 'Model interpretation unavailable; using static issue terms.' });
+      }
+
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Cloning/updating and scanning repository', status: 'running' });
+      const analysis = await analyzeRepoForIssue(parsed.owner, parsed.repo, issue, { locationHypothesis });
+      if (analysis.snippets.length === 0) {
+        throw new Error('No impacted snippets found for the selected issue.');
+      }
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${analysis.snippets.length} impacted snippet(s) in ${analysis.repoPath}` });
+
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Creating isolated reproduction clone', status: 'running' });
+      const workspacePath = await prepareReproductionClone(analysis.repoPath, parsed.owner, parsed.repo, issue.number);
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: workspacePath });
+
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Running clean baseline build and tests', status: 'running' });
+      const baseline = await runBaselineValidation(workspacePath);
+      broadcast({
+        command: 'analysisLogStep',
+        stepIndex,
+        action: 'update',
+        status: 'completed',
+        detail: `build ${baseline.build.status}; tests ${baseline.test.status}`,
+      });
+
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Generating focused regression test', status: 'running' });
+      const generated = await generateReproductionTest(analysis, generationInstructions);
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${generated.files.length} test file(s): ${generated.files.map(file => file.path).join(', ')}` });
+
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Applying generated test files only', status: 'running' });
+      const changedFiles = await applyGeneratedFix(workspacePath, generated);
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: changedFiles.join(', ') });
+
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Running regression test against buggy revision', status: 'running' });
+      const reproduction = await runReproductionValidation(workspacePath);
+      broadcast({
+        command: 'analysisLogStep',
+        stepIndex,
+        action: 'update',
+        status: 'completed',
+        detail: `build ${reproduction.build.status}; tests ${reproduction.test.status}`,
+      });
+
+      stepIndex++;
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'add', stepName: 'Classifying and saving reproduction evidence', status: 'running' });
+      const report = await finalizeReproductionReport({
+        workspacePath,
+        changedFiles,
+        generationSummary: generated.summary,
+        baseline,
+        reproduction,
+      });
+      broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${report.status}: ${report.reason}` });
+      broadcast({
+        command: 'repoIssueReproductionResult',
+        success: true,
+        loading: false,
+        message: `${report.status}: ${report.reason}`,
+        report: reproductionReportForClient(report),
+        generatedTests: generated.files.map(file => ({ path: file.path, content: file.content.slice(0, 50_000) })),
+        snippets: analysis.snippets,
+        repository: `${parsed.owner}/${parsed.repo}`,
+        issue,
+      });
+      bonsaiLog('Issue reproduction attempt completed:', report.status, report.reportPath);
+    } catch (err: any) {
+      bonsaiLog('Issue reproduction attempt failed:', err?.message || err);
+      broadcast({ command: 'analysisLogStep', action: 'error', detail: err?.message || 'Unknown error' });
+      broadcast({
+        command: 'repoIssueReproductionResult',
+        success: false,
+        loading: false,
+        message: err?.message || 'Issue reproduction attempt failed',
       });
     }
     return;

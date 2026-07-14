@@ -275,6 +275,16 @@ ${input.fileContext || '(No complete file context was available. Return no inven
   `.trim();
 }
 
+function rejectSymlinkTraversal(root: string, relativeFile: string): void {
+  let cursor = root;
+  for (const segment of relativeFile.split('/')) {
+    cursor = path.join(cursor, segment);
+    if (fs.existsSync(cursor) && fs.lstatSync(cursor).isSymbolicLink()) {
+      throw new Error(`Generated file path traverses a symbolic link: ${relativeFile}`);
+    }
+  }
+}
+
 export async function applyGeneratedFix(workspacePath: string, generated: GeneratedFix): Promise<string[]> {
   const root = path.resolve(workspacePath);
   const changedFiles: string[] = [];
@@ -284,6 +294,7 @@ export async function applyGeneratedFix(workspacePath: string, generated: Genera
     if (!target.startsWith(root + path.sep)) {
       throw new Error(`Generated file escapes workspace: ${relativeFile}`);
     }
+    rejectSymlinkTraversal(root, relativeFile);
     await fs.promises.mkdir(path.dirname(target), { recursive: true });
     await fs.promises.writeFile(target, file.content, 'utf8');
     changedFiles.push(relativeFile);
@@ -343,7 +354,12 @@ export function detectValidationCommands(workspacePath: string): Partial<Record<
     return { build: command('build', './gradlew', ['assemble', '--no-daemon']), test: command('test', './gradlew', ['test', '--no-daemon']) };
   }
   if (fs.existsSync(path.join(workspacePath, 'pyproject.toml')) || fs.existsSync(path.join(workspacePath, 'setup.py'))) {
-    const hasTests = fs.existsSync(path.join(workspacePath, 'tests')) || fs.existsSync(path.join(workspacePath, 'pytest.ini'));
+    const rootPythonTests = fs.readdirSync(workspacePath, { withFileTypes: true })
+      .some(entry => entry.isFile() && (/^test_.+\.py$/i.test(entry.name) || /.+_test\.py$/i.test(entry.name)));
+    const hasTests = fs.existsSync(path.join(workspacePath, 'test'))
+      || fs.existsSync(path.join(workspacePath, 'tests'))
+      || fs.existsSync(path.join(workspacePath, 'pytest.ini'))
+      || rootPythonTests;
     return {
       build: command('build', 'python3', ['-m', 'compileall', '-q', '.']),
       test: hasTests ? command('test', 'python3', ['-m', 'pytest', '-q']) : undefined,

@@ -93,6 +93,20 @@ The **Analyze Repo for Fix** workflow can implement one selected GitHub issue fo
 
 Reports and logs are stored in each clone's `.bonsai-reports/` folder. Nothing is pushed, merged, or committed automatically. Build and test scripts execute repository code, so analyze only repositories you trust.
 
+## Error reproduction workflow
+
+The **Attempt Error Reproduction** workflow tries to create evidence for a selected issue before proposing a fix:
+
+1. Select a collected GitHub issue and click **Attempt Error Reproduction**.
+2. Confirm the safety warning; this workflow executes detected repository commands.
+3. BonsAIDE creates one isolated clone under `artifacts/repo-reproduction-workspaces/<owner>__<repo>/issue-<n>/reproduction/`.
+4. It runs the detected setup, build, and test commands to establish a clean baseline. For Python repositories, BonsAIDE creates `.bonsai-venv` inside the clone, installs `pytest` there, detects conventional test directories and root-level `test_*.py`/`*_test.py` modules, and uses the virtualenv interpreter without changing global Python packages.
+5. The selected Pi model generates test files only; production files, manifests, lockfiles, and configuration are rejected.
+6. BonsAIDE applies the generated regression test and reruns the detected build and tests.
+7. The result is classified as **REPRODUCED** only when the baseline tests pass, the post-test run fails, and its output identifies a generated regression-test file. Passing generated tests are **NOT_REPRODUCED**; baseline failures, build failures, unavailable test commands, or unrelated failures are **INCONCLUSIVE**.
+
+The UI displays the generated test, captured failure output, commands, workspace, diff, and report path. Reports are stored under the clone's `.bonsai-reports/reproduction/` directory. Nothing is committed or pushed automatically.
+
 ---
 
 ## UI Rearrangement & Interactivity Ideas

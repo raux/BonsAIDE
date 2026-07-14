@@ -275,19 +275,32 @@ textarea {
     margin: 0;
 }
 
-#btnAnalyzeRepoForFix {
+.issue-action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 7px;
+}
+
+#btnAnalyzeRepoForFix,
+#btnReproduceRepoIssue {
     appearance: none;
     border: 0;
     border-radius: 8px;
     padding: 8px 10px;
     font-weight: 700;
     color: #fff;
-    background: #b45309;
     cursor: pointer;
     white-space: nowrap;
 }
 
-#btnAnalyzeRepoForFix:disabled {
+#btnAnalyzeRepoForFix { background: #b45309; }
+#btnReproduceRepoIssue { background: #0369a1; }
+#btnAnalyzeRepoForFix:hover { background: #92400e; }
+#btnReproduceRepoIssue:hover { background: #075985; }
+
+#btnAnalyzeRepoForFix:disabled,
+#btnReproduceRepoIssue:disabled {
     cursor: not-allowed;
     opacity: .45;
     filter: grayscale(35%);
@@ -314,6 +327,85 @@ textarea {
     border: 1px solid #d1d5db;
     border-radius: 6px;
     resize: vertical;
+}
+
+/* ---- Error reproduction ---------------------------------- */
+.reproduction-panel {
+    grid-column: 1 / -1;
+    border: 1px solid #bae6fd;
+    background: #f0f9ff;
+    border-radius: 8px;
+    margin-top: 12px;
+    overflow: hidden;
+}
+
+.reproduction-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #e0f2fe;
+    border-bottom: 1px solid #bae6fd;
+}
+
+.reproduction-header h3 {
+    margin: 0;
+    font-size: 14px;
+    color: #075985;
+}
+
+.reproduction-summary {
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.reproduction-summary.status-reproduced { color: #b91c1c; }
+.reproduction-summary.status-not-reproduced { color: #15803d; }
+.reproduction-summary.status-inconclusive { color: #b45309; }
+
+.reproduction-content {
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+}
+
+.reproduction-evidence {
+    padding: 10px;
+    border: 1px solid #bae6fd;
+    border-left-width: 5px;
+    border-radius: 7px;
+    background: #fff;
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.reproduction-evidence.status-reproduced { border-left-color: #b91c1c; }
+.reproduction-evidence.status-not-reproduced { border-left-color: #15803d; }
+.reproduction-evidence.status-inconclusive { border-left-color: #b45309; }
+
+.reproduction-evidence label {
+    display: block;
+    margin-top: 6px;
+    font-weight: 700;
+    color: #334155;
+}
+
+.reproduction-evidence label:first-child { margin-top: 0; }
+
+.reproduction-test-file,
+.reproduction-output {
+    margin: 0;
+    padding: 9px;
+    border: 1px solid #dbeafe;
+    border-radius: 6px;
+    background: #0f172a;
+    color: #e2e8f0;
+    white-space: pre-wrap;
+    max-height: 320px;
+    overflow: auto;
+    font-size: 12px;
 }
 
 /* ---- Fix alternatives ------------------------------------ */

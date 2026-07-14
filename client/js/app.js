@@ -193,14 +193,56 @@ document.getElementById('btnAnalyzeRepoForFix').addEventListener('click', functi
     }
 
     analysisLogClear();
+    reproductionClear();
     fixAlternativesClear();
-    analysisChecklistStart();
+    analysisChecklistStart(DEFAULT_ANALYSIS_CHECKLIST);
     var modelId = getSelectedModelId();
     analysisLogSetModel(modelId);
 
     applySelectedModelConfiguration();
     vscode.postMessage({
         command: 'analyzeRepoForFix',
+        repoUrl: repoUrl,
+        issue: issue,
+        model: modelId,
+        generationInstructions: generationInstructions
+    });
+});
+
+document.getElementById('btnReproduceRepoIssue').addEventListener('click', function () {
+    var repoUrl = document.getElementById('githubRepoUrl').value || '';
+    var issue = currentSelectedIssue();
+    var statusEl = document.getElementById('repoAnalysisStatus');
+    var instructionsEl = document.getElementById('codeGenerationInstructions');
+    var generationInstructions = instructionsEl ? instructionsEl.value : '';
+
+    if (!repoUrl.trim() || !issue) {
+        if (statusEl) {
+            statusEl.textContent = 'Select a repository and issue first.';
+            statusEl.className = 'issue-analysis-status error';
+        }
+        return;
+    }
+
+    var trusted = window.confirm(
+        'This workflow runs detected dependency, build, and test commands from the selected repository inside an isolated clone. Continue only if you trust the repository.'
+    );
+    if (!trusted) { return; }
+
+    if (statusEl) {
+        statusEl.textContent = 'Attempting to reproduce the issue with a focused failing regression test...';
+        statusEl.className = 'issue-analysis-status processing';
+    }
+
+    analysisLogClear();
+    reproductionClear();
+    fixAlternativesClear();
+    analysisChecklistStart(REPRODUCTION_ANALYSIS_CHECKLIST);
+    var modelId = getSelectedModelId();
+    analysisLogSetModel(modelId);
+    applySelectedModelConfiguration();
+    vscode.postMessage({
+        command: 'reproduceRepoIssue',
         repoUrl: repoUrl,
         issue: issue,
         model: modelId,
@@ -225,6 +267,17 @@ var DEFAULT_ANALYSIS_CHECKLIST = [
     'Generate and apply 4 fixes',
     'Run build and tests in each clone',
     'Display 4 validated fix candidates'
+];
+var REPRODUCTION_ANALYSIS_CHECKLIST = [
+    'Validate URL and selected issue',
+    'Interpret failure behavior and search signals',
+    'Clone/update and scan repository',
+    'Create isolated reproduction clone',
+    'Run clean baseline build and tests',
+    'Generate focused regression test',
+    'Apply generated test files only',
+    'Run regression test against buggy revision',
+    'Classify and save reproduction evidence'
 ];
 var analysisChecklistState = [];
 var latestFixAlternatives = [];
@@ -295,8 +348,9 @@ function analysisChecklistClear() {
     analysisChecklistRender();
 }
 
-function analysisChecklistStart() {
-    analysisChecklistState = DEFAULT_ANALYSIS_CHECKLIST.map(function (title) {
+function analysisChecklistStart(checklist) {
+    var steps = Array.isArray(checklist) && checklist.length ? checklist : DEFAULT_ANALYSIS_CHECKLIST;
+    analysisChecklistState = steps.map(function (title) {
         return { title: title, detail: '', status: 'pending' };
     });
     analysisChecklistRender();
@@ -304,12 +358,12 @@ function analysisChecklistStart() {
 
 function analysisChecklistEnsureStep(stepIndex, stepName) {
     if (!analysisChecklistState.length) {
-        analysisChecklistStart();
+        analysisChecklistStart(DEFAULT_ANALYSIS_CHECKLIST);
     }
     while (stepIndex >= analysisChecklistState.length) {
         analysisChecklistState.push({ title: 'Step ' + (analysisChecklistState.length + 1), detail: '', status: 'pending' });
     }
-    if (stepName && !DEFAULT_ANALYSIS_CHECKLIST[stepIndex]) {
+    if (stepName) {
         analysisChecklistState[stepIndex].title = stepName;
     }
 }
@@ -349,7 +403,7 @@ function analysisChecklistRender() {
     if (!analysisChecklistState.length) {
         var emptyEl = document.createElement('li');
         emptyEl.className = 'checklist-empty';
-        emptyEl.textContent = 'Run “Analyze Repo for Fix” to see the steps.';
+        emptyEl.textContent = 'Run a repository workflow to see its steps.';
         listEl.appendChild(emptyEl);
         if (progressEl) { progressEl.textContent = '0/0 done'; }
         return;
@@ -394,6 +448,71 @@ function fixAlternativesClear() {
     if (panel) { panel.style.display = 'none'; }
     if (cards) { cards.innerHTML = ''; }
     if (summary) { summary.textContent = ''; }
+}
+
+function reproductionClear() {
+    var panel = document.getElementById('reproductionPanel');
+    var summary = document.getElementById('reproductionSummary');
+    var content = document.getElementById('reproductionContent');
+    if (panel) { panel.style.display = 'none'; }
+    if (summary) {
+        summary.textContent = '';
+        summary.className = 'reproduction-summary';
+    }
+    if (content) { content.innerHTML = ''; }
+}
+
+function renderReproductionResult(report, generatedTests) {
+    var panel = document.getElementById('reproductionPanel');
+    var summary = document.getElementById('reproductionSummary');
+    var content = document.getElementById('reproductionContent');
+    if (!panel || !content || !report) { return; }
+
+    var statusClass = String(report.status || 'INCONCLUSIVE').toLowerCase().replace(/_/g, '-');
+    panel.style.display = 'block';
+    content.innerHTML = '';
+    if (summary) {
+        summary.textContent = report.status || 'INCONCLUSIVE';
+        summary.className = 'reproduction-summary status-' + statusClass;
+    }
+
+    var evidence = document.createElement('div');
+    evidence.className = 'reproduction-evidence status-' + statusClass;
+    appendTextRow(evidence, 'Status', report.status);
+    appendTextRow(evidence, 'Reason', report.reason);
+    appendTextRow(evidence, 'Isolated clone', report.workspacePath);
+    appendTextRow(evidence, 'Generated test files', Array.isArray(report.changedFiles) ? report.changedFiles.join('\n') : '');
+    appendTextRow(evidence, 'Baseline build', report.baseline && report.baseline.build ? report.baseline.build.status + ' — ' + report.baseline.build.displayCommand : 'unavailable');
+    appendTextRow(evidence, 'Baseline tests', report.baseline && report.baseline.test ? report.baseline.test.status + ' — ' + report.baseline.test.displayCommand : 'unavailable');
+    appendTextRow(evidence, 'Reproduction build', report.reproduction && report.reproduction.build ? report.reproduction.build.status + ' — ' + report.reproduction.build.displayCommand : 'unavailable');
+    appendTextRow(evidence, 'Reproduction tests', report.reproduction && report.reproduction.test ? report.reproduction.test.status + ' — ' + report.reproduction.test.displayCommand : 'unavailable');
+    appendTextRow(evidence, 'Report', report.reportPath);
+    appendTextRow(evidence, 'Generated-test diff', report.diffPath);
+    content.appendChild(evidence);
+
+    (Array.isArray(generatedTests) ? generatedTests : []).forEach(function (testFile) {
+        var heading = document.createElement('h4');
+        heading.textContent = 'Generated test: ' + (testFile.path || '(unknown path)');
+        content.appendChild(heading);
+        var testCode = document.createElement('pre');
+        testCode.className = 'reproduction-test-file';
+        testCode.textContent = testFile.content || '';
+        content.appendChild(testCode);
+    });
+
+    var reproductionTest = report.reproduction && report.reproduction.test;
+    if (reproductionTest) {
+        var outputHeading = document.createElement('h4');
+        outputHeading.textContent = 'Reproduction test output';
+        content.appendChild(outputHeading);
+        var output = document.createElement('pre');
+        output.className = 'reproduction-output';
+        var capturedOutput = [];
+        if (reproductionTest.stdout) { capturedOutput.push('--- stdout ---\n' + reproductionTest.stdout); }
+        if (reproductionTest.stderr) { capturedOutput.push('--- stderr ---\n' + reproductionTest.stderr); }
+        output.textContent = capturedOutput.join('\n\n') || '(No test output was captured.)';
+        content.appendChild(output);
+    }
 }
 
 function appendTextRow(container, label, value) {
@@ -712,7 +831,9 @@ function selectIssue(index) {
     selectedIssueIndex = index;
 
     var analyzeButton = document.getElementById('btnAnalyzeRepoForFix');
+    var reproduceButton = document.getElementById('btnReproduceRepoIssue');
     if (analyzeButton) { analyzeButton.disabled = false; }
+    if (reproduceButton) { reproduceButton.disabled = false; }
 
     var listEl = document.getElementById('issuesList');
     if (listEl) {
@@ -751,7 +872,10 @@ function renderIssuesExplorer(issues) {
     collectedIssuesState = Array.isArray(issues) ? issues : [];
     selectedIssueIndex = -1;
     var analyzeButton = document.getElementById('btnAnalyzeRepoForFix');
+    var reproduceButton = document.getElementById('btnReproduceRepoIssue');
     if (analyzeButton) { analyzeButton.disabled = true; }
+    if (reproduceButton) { reproduceButton.disabled = true; }
+    reproductionClear();
     explorerEl.style.display = 'grid';
     listEl.innerHTML = '';
 
@@ -977,6 +1101,21 @@ window.addEventListener('message', function (event) {
                 issuesStatusEl.textContent = '✗ ' + (message.message || 'Issue collection failed');
                 issuesStatusEl.className = 'error';
             }
+        }
+    }
+
+    if (message.command === 'repoIssueReproductionResult') {
+        var reproductionStatus = document.getElementById('repoAnalysisStatus');
+        if (reproductionStatus) {
+            reproductionStatus.textContent = message.message || '';
+            reproductionStatus.className = message.loading
+                ? 'issue-analysis-status processing'
+                : message.success ? 'issue-analysis-status success' : 'issue-analysis-status error';
+        }
+        if (message.loading) {
+            reproductionClear();
+        } else if (message.success && message.report) {
+            renderReproductionResult(message.report, message.generatedTests);
         }
     }
 

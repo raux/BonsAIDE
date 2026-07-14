@@ -58,6 +58,8 @@ test('GET / serves the browser UI', async () => {
     assert.match(res.body, /id="issuesList"/);
     assert.match(res.body, /id="selectedIssueBody"/);
     assert.match(res.body, /id="btnAnalyzeRepoForFix"/);
+    assert.match(res.body, /id="btnReproduceRepoIssue"/);
+    assert.match(res.body, /id="reproductionPanel"/);
     assert.match(res.body, /id="codeGenerationInstructions"/);
     assert.match(res.body, /Four Isolated Fix Candidates/);
     assert.match(res.body, /id="analysisChecklist"/);

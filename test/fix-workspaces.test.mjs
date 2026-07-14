@@ -44,6 +44,23 @@ test('parseGeneratedFix accepts complete files and rejects unsafe paths', () => 
   })), /protected directory/);
 });
 
+test('applyGeneratedFix rejects symbolic-link traversal outside a workspace', async () => {
+  const workspace = tempDir('bonsai-symlink-workspace-');
+  const outside = tempDir('bonsai-symlink-outside-');
+  try {
+    fs.symlinkSync(outside, path.join(workspace, 'tests'), 'dir');
+    const generated = parseGeneratedFix(JSON.stringify({
+      summary: 'Unsafe linked test.',
+      files: [{ path: 'tests/reproduction.test.js', content: 'bad\n' }],
+    }));
+    await assert.rejects(() => applyGeneratedFix(workspace, generated), /symbolic link/);
+    assert.equal(fs.existsSync(path.join(outside, 'reproduction.test.js')), false);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('buildFixGenerationPrompt requires complete file JSON and post-fix validation', () => {
   const prompt = buildFixGenerationPrompt({
     owner: 'owner',
@@ -75,6 +92,19 @@ test('buildFixGenerationPrompt requires complete file JSON and post-fix validati
   assert.match(prompt, /BonsAIDE will run them after applying/);
   assert.match(prompt, /Defensive guard/);
   assert.match(prompt, /Do not add dependencies; preserve Node 18 compatibility/);
+});
+
+test('detectValidationCommands recognizes root-level Python test modules', () => {
+  const workspace = tempDir('bonsai-python-tests-');
+  try {
+    fs.writeFileSync(path.join(workspace, 'setup.py'), 'from setuptools import setup\n');
+    fs.writeFileSync(path.join(workspace, 'test_parser.py'), 'def test_parser():\n    assert True\n');
+    const commands = detectValidationCommands(workspace);
+    assert.deepEqual(commands.build, { label: 'build', command: 'python3', args: ['-m', 'compileall', '-q', '.'] });
+    assert.deepEqual(commands.test, { label: 'test', command: 'python3', args: ['-m', 'pytest', '-q'] });
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 });
 
 test('prepareFourFixClones creates four isolated Git branches', async () => {
