@@ -1063,6 +1063,9 @@ window.addEventListener('message', function (event) {
                     'color': '#fff',
                     'text-valign': 'center',
                     'text-halign': 'center',
+                    'text-wrap': 'wrap',
+                    'text-max-width': '72px',
+                    'font-size': '12px',
                     'border-width': 20,
                     'width': 'data(size)',
                     'height': 'data(size)'
@@ -1093,7 +1096,9 @@ window.addEventListener('message', function (event) {
             directed: true,
             padding: 10,
             spacingFactor: 1.5,
-            animate: false,
+            animate: Boolean(message.progressive),
+            animationDuration: 900,
+            animationEasing: 'ease-in-out',
             transform: function (node, position) { return { x: position.x, y: -position.y }; }
         }
     });

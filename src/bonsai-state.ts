@@ -10,6 +10,7 @@ export interface TokenUsage {
 
 export interface CodeNode {
   id: number;
+  label?: string;
   prompt: string;
   code: string;
   parentId: number | null;
@@ -69,7 +70,7 @@ export function createGraphFromBranch(branch?: Branch): GraphData {
       return {
         data: {
           id: 'n' + s.id,
-          label: '#' + s.id,
+          label: s.label || '#' + s.id,
           code: s.code,
           prompt: s.prompt,
           activity: s.activity,
@@ -138,6 +139,7 @@ export function importBonsaiPayload(payload: any): ImportedBonsaiState {
     name: String(b.name ?? 'Main'),
     nodes: Array.isArray(b.nodes) ? b.nodes.map((n: any) => ({
       id: Number(n.id),
+      label: typeof n.label === 'string' ? n.label : undefined,
       prompt: String(n.prompt ?? ''),
       code: String(n.code ?? ''),
       parentId: (n.parentId === null || n.parentId === undefined) ? null : Number(n.parentId),

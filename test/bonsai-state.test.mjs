@@ -51,12 +51,15 @@ test('trimBranchAtNode deletes a subtree and recomputes leaf flags', () => {
   assert.equal(branch.nodes.find(n => n.id === 4).isLeaf, true);
 });
 
-test('createGraphFromBranch emits Cytoscape nodes and parent edges', () => {
-  const branch = { id: 'main', name: 'Main', nodes: [node(1, null), node(2, 1)] };
+test('createGraphFromBranch emits Cytoscape nodes, custom labels, and parent edges', () => {
+  const child = node(2, 1);
+  child.label = 'Code 1.1';
+  const branch = { id: 'main', name: 'Main', nodes: [node(1, null), child] };
 
   const graph = createGraphFromBranch(branch);
 
   assert.deepEqual(graph.nodes.map(n => n.data.id), ['n1', 'n2']);
+  assert.deepEqual(graph.nodes.map(n => n.data.label), ['#1', 'Code 1.1']);
   assert.deepEqual(graph.edges, [{ data: { source: 'n1', target: 'n2' } }]);
   assert.equal(graph.nodes[1].data.activityColor, '#006d18');
 });
@@ -86,7 +89,7 @@ test('importBonsaiPayload normalizes nodes, recomputes leaves, and tracks curren
         name: 'Main',
         nodes: [
           { id: 10, prompt: 'root', code: 'root', parentId: null, isLeaf: true, activity: 'initial' },
-          { id: 11, prompt: 'child', code: 'child', parentId: 10, activity: 'refactor' },
+          { id: 11, label: 'Test 1.1', prompt: 'child', code: 'child', parentId: 10, activity: 'refactor' },
         ],
       },
     ],
@@ -96,5 +99,6 @@ test('importBonsaiPayload normalizes nodes, recomputes leaves, and tracks curren
   assert.equal(imported.currentId, 11);
   assert.equal(imported.branches[0].nodes[0].isLeaf, false);
   assert.equal(imported.branches[0].nodes[1].isLeaf, true);
+  assert.equal(imported.branches[0].nodes[1].label, 'Test 1.1');
   assert.deepEqual(imported.branches[0].nodes[1].tokens, { prompt: 0, completion: 0, total: 0 });
 });

@@ -62,6 +62,11 @@ test('getActivityColor returns configured colors and fallback color', () => {
   assert.equal(getActivityColor('exceptions'), '#00b0b6');
   assert.equal(getActivityColor('agent_md_alternative'), '#4c51bf');
   assert.equal(getActivityColor('repo_agentic_analysis'), '#7c3aed');
+  assert.equal(getActivityColor('repo_clone'), '#2563eb');
+  assert.equal(getActivityColor('repo_code_snippet'), '#7c3aed');
+  assert.equal(getActivityColor('repo_test_pass'), '#15803d');
+  assert.equal(getActivityColor('repo_test_partial'), '#ca8a04');
+  assert.equal(getActivityColor('repo_test_fail'), '#b91c1c');
   assert.equal(getActivityColor('unknown'), '#777777');
 });
 

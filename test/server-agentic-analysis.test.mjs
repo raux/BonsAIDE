@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
   buildFixAlternativesPrompt,
   buildIssueLocationHypothesisPrompt,
+  buildRepoFixCloneNodes,
   buildRepoIssueSnippetNodes,
+  buildFixAlternativeSnippetNodes,
+  buildFixAlternativeTestNodes,
   formatFixAlternativeAsSourceCode,
   formatFixAlternativesAsMarkdown,
   parseFixAlternatives,
@@ -129,6 +132,64 @@ test('parseFixAlternatives normalizes one implementation per clone plan and form
   assert.doesNotMatch(sourceCode, /try await restoreWithRetry\(\)/);
   assert.doesNotMatch(sourceCode, /## Alternative/);
   assert.doesNotMatch(sourceCode, /Bug location:/);
+});
+
+test('repo-fix graph starts with four clone roots and grows code and test nodes', () => {
+  const cloneGraph = buildRepoFixCloneNodes(makeIssue(), { owner: 'TypeWhisper', repo: 'typewhisper-mac' }, 20);
+
+  assert.equal(cloneGraph.nodes.length, 4);
+  assert.equal(cloneGraph.lastNodeId, 24);
+  assert.deepEqual(cloneGraph.nodes.map(node => node.label), ['Clone 1', 'Clone 2', 'Clone 3', 'Clone 4']);
+  assert.ok(cloneGraph.nodes.every(node => node.parentId === null));
+  assert.ok(cloneGraph.nodes.every(node => node.activity === 'repo_clone'));
+
+  const [alternative] = parseFixAlternatives(JSON.stringify({
+    alternatives: [{
+      title: 'Minimal guard',
+      summary: 'Guard the restore path.',
+      implementations: [{
+        title: 'Inline guard',
+        summary: 'Keep the fix local.',
+        todos: [{
+          bugLocation: 'Services/Restore.swift:10-14',
+          fixIdea: 'Reload a missing model.',
+          potentialMethod: 'restoreModel',
+          sourceCodeSketch: 'if model == nil { reloadModel() }',
+          tests: ['restores an unloaded model', 'preserves a loaded model'],
+        }, {
+          bugLocation: 'Services/Status.swift:30-35',
+          fixIdea: 'Report the restored state.',
+          potentialMethod: 'reportStatus',
+          sourceCodeSketch: 'reportStatus(model.state)',
+          tests: ['reports the restored model'],
+        }],
+      }],
+    }],
+  }));
+  const snippetGraph = buildFixAlternativeSnippetNodes(alternative, 1, cloneGraph.nodes[0].id, cloneGraph.lastNodeId);
+
+  assert.deepEqual(snippetGraph.nodes.map(node => node.label), ['Code 1.1', 'Code 1.2']);
+  assert.ok(snippetGraph.nodes.every(node => node.parentId === cloneGraph.nodes[0].id));
+  assert.ok(snippetGraph.nodes.every(node => node.activity === 'repo_code_snippet'));
+
+  const testGraph = buildFixAlternativeTestNodes(
+    alternative,
+    1,
+    snippetGraph.nodes.map(node => node.id),
+    cloneGraph.nodes[0].id,
+    snippetGraph.lastNodeId,
+    {
+      status: 'PASS',
+      test: { status: 'passed', displayCommand: 'npm test', durationMs: 42 },
+      build: { status: 'passed' },
+      reportPath: '/tmp/report.md',
+    }
+  );
+
+  assert.deepEqual(testGraph.nodes.map(node => node.label), ['Test 1.1', 'Test 1.2', 'Test 1.3']);
+  assert.deepEqual(testGraph.nodes.map(node => node.parentId), [snippetGraph.nodes[0].id, snippetGraph.nodes[0].id, snippetGraph.nodes[1].id]);
+  assert.ok(testGraph.nodes.every(node => node.activity === 'repo_test_pass'));
+  assert.match(testGraph.nodes[0].reasoning, /Test command: npm test/);
 });
 
 test('agentic repo analysis creates one Bonsai node per impacted snippet', () => {

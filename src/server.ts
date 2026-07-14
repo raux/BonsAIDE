@@ -23,7 +23,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { computeLeafSimilaritiesForCode, SimilarityBranch, SimilarityNode } from './similarity';
 import { analyzeCodeWithLizardServer } from './lizard-server';
-import { Branch, CodeNode, LizardMetrics, createGraphFromBranch, importBonsaiPayload, trimBranchAtNode } from './bonsai-state';
+import { Branch, CodeNode, LizardMetrics, createGraphFromBranch, importBonsaiPayload, recomputeLeafFlags, trimBranchAtNode } from './bonsai-state';
 import { analyzeRepoForIssue, writeFixSpecFile, IssueLocationHypothesis, RepoIssueAnalysis } from './repo-analyzer';
 import {
   FIX_CANDIDATE_COUNT,
@@ -725,6 +725,130 @@ export function buildRepoIssueSnippetNodes(
   return { nodes, lastNodeId: nextId, combinedSnippetContent };
 }
 
+function fixTodosForAlternative(alternative: FixAlternative): FixTodo[] {
+  const implementationTodos = alternative.implementations.flatMap(implementation => implementation.todos);
+  return implementationTodos.length > 0 ? implementationTodos : alternative.todos;
+}
+
+export function buildRepoFixCloneNodes(
+  issue: GitHubIssueForDisplay,
+  repoRef: { owner: string; repo: string },
+  firstNodeId: number
+): { nodes: CodeNode[]; lastNodeId: number } {
+  let nextId = firstNodeId;
+  const nodes = Array.from({ length: FIX_CANDIDATE_COUNT }, (_, index): CodeNode => {
+    const candidate = index + 1;
+    return {
+      id: ++nextId,
+      label: `Clone ${candidate}`,
+      prompt: `Clone ${candidate}: preparing isolated fix candidate`,
+      code: `Preparing isolated clone ${candidate} of ${FIX_CANDIDATE_COUNT}...`,
+      parentId: null,
+      children: [],
+      durationMs: 0,
+      tokens: { prompt: 0, completion: 0, total: 0 },
+      reasoning: [
+        `Repository: ${repoRef.owner}/${repoRef.repo}`,
+        `Issue: #${issue.number} ${issue.title}`,
+        `Candidate: ${candidate}/${FIX_CANDIDATE_COUNT}`,
+        'Code snippets and test cases will grow beneath this clone as work completes.'
+      ].join('\n'),
+      lizard: undefined,
+      isLeaf: true,
+      activity: 'repo_clone'
+    };
+  });
+  return { nodes, lastNodeId: nextId };
+}
+
+export function buildFixAlternativeSnippetNodes(
+  alternative: FixAlternative,
+  candidate: number,
+  parentId: number,
+  firstNodeId: number
+): { nodes: CodeNode[]; lastNodeId: number } {
+  let nextId = firstNodeId;
+  const todos = fixTodosForAlternative(alternative);
+  const snippetTodos = todos.length > 0 ? todos : [{
+    bugLocation: '(unknown)',
+    fixIdea: alternative.summary,
+    potentialMethod: '',
+    sourceCodeSketch: formatFixAlternativeAsSourceCode(alternative),
+    tests: []
+  }];
+  const nodes = snippetTodos.map((todo, index): CodeNode => ({
+    id: ++nextId,
+    label: `Code ${candidate}.${index + 1}`,
+    prompt: `Clone ${candidate} code snippet ${index + 1}: ${todo.bugLocation || alternative.title}`,
+    code: todo.sourceCodeSketch || `// ${todo.fixIdea || 'Generated fix snippet'}`,
+    parentId,
+    children: [],
+    durationMs: 0,
+    tokens: { prompt: 0, completion: 0, total: 0 },
+    reasoning: [
+      `Alternative: ${alternative.title}`,
+      `Bug location: ${todo.bugLocation || '(unknown)'}`,
+      `Fix idea: ${todo.fixIdea || '(not specified)'}`,
+      `Potential method: ${todo.potentialMethod || '(not specified)'}`
+    ].join('\n'),
+    lizard: undefined,
+    isLeaf: true,
+    activity: 'repo_code_snippet'
+  }));
+  return { nodes, lastNodeId: nextId };
+}
+
+export function buildFixAlternativeTestNodes(
+  alternative: FixAlternative,
+  candidate: number,
+  snippetNodeIds: number[],
+  cloneNodeId: number,
+  firstNodeId: number,
+  execution?: FixCandidateReport
+): { nodes: CodeNode[]; lastNodeId: number } {
+  let nextId = firstNodeId;
+  const todos = fixTodosForAlternative(alternative);
+  const plannedTests = todos.flatMap((todo, todoIndex) => {
+    const tests = todo.tests.length > 0 ? todo.tests : [`Validate ${todo.potentialMethod || todo.bugLocation || alternative.title}`];
+    return tests.map(testCase => ({ todoIndex, testCase }));
+  });
+  if (plannedTests.length === 0) {
+    plannedTests.push({ todoIndex: 0, testCase: `Run detected tests for ${alternative.title}` });
+  }
+  const activity = execution?.status === 'PASS'
+    ? 'repo_test_pass'
+    : execution?.status === 'FAIL'
+      ? 'repo_test_fail'
+      : 'repo_test_partial';
+  const nodes = plannedTests.map((plannedTest, index): CodeNode => ({
+    id: ++nextId,
+    label: `Test ${candidate}.${index + 1}`,
+    prompt: `Clone ${candidate} test case ${index + 1}`,
+    code: plannedTest.testCase,
+    parentId: snippetNodeIds[plannedTest.todoIndex] ?? snippetNodeIds[0] ?? cloneNodeId,
+    children: [],
+    durationMs: execution?.test.durationMs ?? 0,
+    tokens: { prompt: 0, completion: 0, total: 0 },
+    reasoning: [
+      `Candidate status: ${execution?.status ?? 'pending'}`,
+      `Test command: ${execution?.test.displayCommand || '(not detected)'}`,
+      `Test result: ${execution?.test.status ?? 'pending'}`,
+      `Build result: ${execution?.build.status ?? 'pending'}`,
+      execution?.reportPath ? `Report: ${execution.reportPath}` : ''
+    ].filter(Boolean).join('\n'),
+    lizard: undefined,
+    isLeaf: true,
+    activity
+  }));
+  return { nodes, lastNodeId: nextId };
+}
+
+function broadcastProgressGraph(branch: Branch): void {
+  recomputeLeafFlags(branch);
+  broadcast({ command: 'historyUpdate', history: branch.nodes });
+  broadcast({ command: 'renderGraph', graph: createGraphFromBranch(branch), progressive: true });
+}
+
 async function fetchGitHubIssues(owner: string, repo: string): Promise<{ text: string; issues: GitHubIssueForDisplay[] }> {
   const headers: Record<string, string> = {
     'Accept': 'application/vnd.github.v3+json',
@@ -1238,6 +1362,20 @@ async function handleMessage(message: any): Promise<void> {
       }
       broadcast({ command: 'analysisLogStep', stepIndex: 0, action: 'update', status: 'completed', detail: `${parsed.owner}/${parsed.repo}` });
 
+      // Start this workflow with four visible clone roots. Candidate-specific
+      // code and test nodes are appended as generation and validation complete.
+      const cloneGraph = buildRepoFixCloneNodes(issue, parsed, 0);
+      const progressBranch: Branch = { id: 'main', name: `Issue #${issue.number}`, nodes: cloneGraph.nodes };
+      const cloneNodeIds = cloneGraph.nodes.map(node => node.id);
+      const candidateSnippetNodeIds = new Map<number, number[]>();
+      const candidatesWithTests = new Set<number>();
+      branches = [progressBranch];
+      activeBranchId = progressBranch.id;
+      selectedNodeId = null;
+      currentId = cloneGraph.lastNodeId;
+      broadcast({ command: 'leafSimilarities', node: null, similarities: [] });
+      broadcastProgressGraph(progressBranch);
+
       // Step 2: Rephrase the issue into location hypotheses before scanning the checkout
       let stepIndex = 1;
       let locationHypothesis: IssueLocationHypothesis | undefined;
@@ -1285,6 +1423,14 @@ async function handleMessage(message: any): Promise<void> {
       }
       analysis.agenticAnalysis = formatFixAlternativesAsMarkdown(fixAlternatives);
       analysis.specPath = await writeFixSpecFile(analysis);
+      fixAlternatives.forEach((alternative, index) => {
+        const cloneNode = progressBranch.nodes.find(node => node.id === cloneNodeIds[index]);
+        if (!cloneNode) { return; }
+        cloneNode.prompt = `Clone ${index + 1}: ${alternative.title}`;
+        cloneNode.code = alternative.summary || alternative.title;
+        cloneNode.reasoning = `${cloneNode.reasoning}\nAlternative: ${alternative.title}\nPlan ready; waiting for isolated clone generation.`;
+      });
+      broadcastProgressGraph(progressBranch);
       broadcast({ command: 'analysisLogStep', stepIndex, action: 'update', status: 'completed', detail: `${fixAlternatives.length} alternatives. Initial spec: ${analysis.specPath}` });
 
       // Steps 6-8: create four clones, generate/apply each fix, then build/test each clone.
@@ -1298,13 +1444,59 @@ async function handleMessage(message: any): Promise<void> {
         if (phase === 'clones') {
           broadcast({ command: 'analysisLogStep', stepIndex: cloneStep, action: 'update', status: 'completed', detail });
           broadcast({ command: 'analysisLogStep', stepIndex: generationStep, action: 'update', status: 'running', detail: 'Starting candidate 1/4' });
-        } else if (phase === 'generate' || phase === 'generated') {
+          for (const cloneNodeId of cloneNodeIds) {
+            const cloneNode = progressBranch.nodes.find(node => node.id === cloneNodeId);
+            if (cloneNode) { cloneNode.code = 'Isolated clone ready; waiting to generate its fix.'; }
+          }
+          broadcastProgressGraph(progressBranch);
+          return;
+        }
+
+        const alternative = fixAlternatives[candidate - 1];
+        const cloneNodeId = cloneNodeIds[candidate - 1];
+        const cloneNode = progressBranch.nodes.find(node => node.id === cloneNodeId);
+        if (phase === 'generate' || phase === 'generated') {
           const complete = phase === 'generated' && candidate === FIX_CANDIDATE_COUNT;
           broadcast({ command: 'analysisLogStep', stepIndex: generationStep, action: 'update', status: complete ? 'completed' : 'running', detail });
-        } else {
-          const complete = phase === 'validated' && candidate === FIX_CANDIDATE_COUNT;
-          broadcast({ command: 'analysisLogStep', stepIndex: validationStep, action: 'update', status: complete ? 'completed' : 'running', detail });
+          if (cloneNode) { cloneNode.code = detail; }
+          if (phase === 'generated' && alternative && !candidateSnippetNodeIds.has(candidate)) {
+            const snippetGraph = buildFixAlternativeSnippetNodes(alternative, candidate, cloneNodeId, currentId);
+            currentId = snippetGraph.lastNodeId;
+            progressBranch.nodes.push(...snippetGraph.nodes);
+            candidateSnippetNodeIds.set(candidate, snippetGraph.nodes.map(node => node.id));
+          }
+          broadcastProgressGraph(progressBranch);
+          return;
         }
+
+        const complete = phase === 'validated' && candidate === FIX_CANDIDATE_COUNT;
+        broadcast({ command: 'analysisLogStep', stepIndex: validationStep, action: 'update', status: complete ? 'completed' : 'running', detail });
+        if (cloneNode) { cloneNode.code = detail; }
+        if (phase === 'validated' && alternative && !candidatesWithTests.has(candidate)) {
+          const testGraph = buildFixAlternativeTestNodes(
+            alternative,
+            candidate,
+            candidateSnippetNodeIds.get(candidate) || [],
+            cloneNodeId,
+            currentId,
+            alternative.execution
+          );
+          currentId = testGraph.lastNodeId;
+          progressBranch.nodes.push(...testGraph.nodes);
+          candidatesWithTests.add(candidate);
+          if (cloneNode && alternative.execution) {
+            cloneNode.prompt = `Clone ${candidate}: ${alternative.title} — ${alternative.execution.status}`;
+            cloneNode.reasoning = [
+              cloneNode.reasoning,
+              `Workspace: ${alternative.execution.workspacePath}`,
+              `Changed files: ${alternative.execution.changedFiles.join(', ') || '(none)'}`,
+              `Build: ${alternative.execution.build.status}`,
+              `Tests: ${alternative.execution.test.status}`,
+              `Report: ${alternative.execution.reportPath}`
+            ].filter(Boolean).join('\n');
+          }
+        }
+        broadcastProgressGraph(progressBranch);
       });
 
       analysis.agenticAnalysis = [

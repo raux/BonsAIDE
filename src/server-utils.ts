@@ -116,6 +116,11 @@ export function getActivityColor(activity?: string): string {
     case 'agent_md_alternative': return '#4c51bf';
     case 'repo_issue_analysis':  return '#b45309';
     case 'repo_agentic_analysis': return '#7c3aed';
+    case 'repo_clone':           return '#2563eb';
+    case 'repo_code_snippet':    return '#7c3aed';
+    case 'repo_test_pass':       return '#15803d';
+    case 'repo_test_partial':    return '#ca8a04';
+    case 'repo_test_fail':       return '#b91c1c';
     default:                    return '#777777';
   }
 }
